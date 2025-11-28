@@ -3,3 +3,5 @@ server/node_modules
 **/.env
 server/dist
 webapp/node_modules
+client-js/node_modules
+.vscode
