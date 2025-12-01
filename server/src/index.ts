@@ -87,7 +87,7 @@ fastify.get('/health', async () => {
 
 // ===== SPAN ENDPOINTS (ElasticSearch) =====
 fastify.post('/span', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
-  const organisationId = request.organisationId!;
+  const organisation = request.organisation!;
   const spans = request.body as Span | Span[];
 
   const spansArray = Array.isArray(spans) ? spans : [spans];
@@ -95,7 +95,7 @@ fastify.post('/span', { preHandler: authenticate }, async (request: Authenticate
   // Add organisation to each span
   const spansWithOrg = spansArray.map(span => ({
     ...span,
-    organisation: organisationId,
+    organisation,
   }));
   console.log("inserting: "+spansWithOrg.length+" spans");
   await bulkInsertSpans(spansWithOrg);
@@ -234,9 +234,9 @@ fastify.get('/api-key/:id', async (request, reply) => {
 });
 
 fastify.get('/api-key', async (request, reply) => {
-  const organisationId = (request.query as any).organisation_id as string | undefined;
+  const organisationId = (request.query as any).organisation as string | undefined;
   if (!organisationId) {
-    reply.code(400).send({ error: 'organisation_id query parameter is required' });
+    reply.code(400).send({ error: 'organisation query parameter is required' });
     return;
   }
   const query = (request.query as any).q as string | undefined;
@@ -267,9 +267,9 @@ fastify.delete('/api-key/:id', async (request, reply) => {
 
 // ===== DATASET ENDPOINTS (PostgreSQL) =====
 fastify.post('/dataset', async (request, reply) => {
-	const organisationId = (request.query as any).organisation_id as string | undefined;
+	const organisationId = (request.query as any).organisation as string | undefined;
   if (!organisationId) {
-    reply.code(400).send({ error: 'organisation_id query parameter is required' });
+    reply.code(400).send({ error: 'organisation query parameter is required' });
     return;
   }
   const dataset = await createDataset(request.body as any);
@@ -287,9 +287,9 @@ fastify.get('/dataset/:id', async (request, reply) => {
 });
 
 fastify.get('/dataset', async (request, reply) => {
-  const organisationId = (request.query as any).organisation_id as string | undefined;
+  const organisationId = (request.query as any).organisation as string | undefined;
   if (!organisationId) {
-    reply.code(400).send({ error: 'organisation_id query parameter is required' });
+    reply.code(400).send({ error: 'organisation query parameter is required' });
     return;
   }
   const query = (request.query as any).q as string | undefined;
@@ -320,7 +320,7 @@ fastify.delete('/dataset/:id', async (request, reply) => {
 
 // ===== INPUT ENDPOINTS (ElasticSearch) =====
 fastify.post('/input', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
-  const organisationId = request.organisationId!;
+  const organisation = request.organisation!;
   const inputs = request.body as Span | Span[];
 
   const inputsArray = Array.isArray(inputs) ? inputs : [inputs];
@@ -336,7 +336,7 @@ fastify.post('/input', { preHandler: authenticate }, async (request: Authenticat
   // Add organisation to each input
   const inputsWithOrg = inputsArray.map(input => ({
     ...input,
-    organisation: organisationId,
+    organisation,
   }));
 
   await bulkInsertInputs(inputsWithOrg);
@@ -344,14 +344,14 @@ fastify.post('/input', { preHandler: authenticate }, async (request: Authenticat
 });
 
 fastify.get('/input', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
-  const organisationId = request.organisationId!;
+  const organisation = request.organisation!;
   const query = (request.query as any).q as string | undefined;
   const datasetId = (request.query as any).dataset_id as string | undefined;
   const limit = parseInt((request.query as any).limit || '100');
   const offset = parseInt((request.query as any).offset || '0');
 
   const searchQuery = query ? new SearchQuery(query) : null;
-  const result = await searchInputs(searchQuery, organisationId, datasetId, limit, offset);
+  const result = await searchInputs(searchQuery, organisation, datasetId, limit, offset);
   
   return {
     hits: result.hits,
@@ -378,9 +378,9 @@ fastify.get('/experiment/:id', async (request, reply) => {
 });
 
 fastify.get('/experiment', async (request, reply) => {
-  const organisationId = (request.query as any).organisation_id as string | undefined;
+  const organisationId = (request.query as any).organisation as string | undefined;
   if (!organisationId) {
-    reply.code(400).send({ error: 'organisation_id query parameter is required' });
+    reply.code(400).send({ error: 'organisation query parameter is required' });
     return;
   }
   const query = (request.query as any).q as string | undefined;

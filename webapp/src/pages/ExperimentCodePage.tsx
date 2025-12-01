@@ -152,7 +152,7 @@ const ExperimentCodePage: React.FC = () => {
                     <li>
                       <strong>Fetch the dataset:</strong>
                       <br />
-                      <code>GET /dataset/{'{datasetId}'}?organisation_id={'{organisationId}'}</code>
+                      <code>GET /dataset/{'{datasetId}'}?organisation={'{organisationId}'}</code>
                       <br />
                       <small className="text-muted">Headers: Authorization: Bearer {'{your-api-key}'}</small>
                     </li>
@@ -166,7 +166,7 @@ const ExperimentCodePage: React.FC = () => {
                       <br />
                       <code>POST /experiment</code>
                       <br />
-                      <small className="text-muted">Body: {'{'}organisation_id, dataset_id, summary_results{'}'}</small>
+                      <small className="text-muted">Body: {'{'}organisation, dataset, summary_results{'}'}</small>
                     </li>
                     <li>
                       This will create a new experiment here.

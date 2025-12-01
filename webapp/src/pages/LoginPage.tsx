@@ -27,7 +27,7 @@ const LoginPage: React.FC = () => {
         console.log("User fetched/created:", dbUser);
 
         // You might also want to fetch the organisation info from backend
-        const organisationId = dbUser?.organisation_id || user?.organisation_id;
+        const organisationId = dbUser?.organisation || user?.organisation;
         if (organisationId) {
           navigate(`/organisation/${organisationId}`);
         } else {

@@ -4,7 +4,7 @@
  */
 export interface Model {
 	id: string;
-	organisation_id: string;
+	organisation: string;
 	name: string;
 	api_key: string;
 	version?: string;

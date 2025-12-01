@@ -15,7 +15,7 @@ const TopNav: React.FC = () => {
   if (!isAuthenticated) {
     return null;
   }
-  // organisation_id from url /organisation/{organisation_id}
+  // organisation from url /organisation/{organisation}
   // work directly on window.location.pathname
   const pathBits = window.location.pathname.split('/');
   const orgIndex = pathBits.indexOf('organisation');  

@@ -22,7 +22,7 @@
         "name": {
           "type": "string"
         },
-        "organisation_id": {
+        "organisation": {
           "type": "string"
         },
         "updated": {
@@ -35,7 +35,7 @@
       },
       "required": [
         "id",
-        "organisation_id",
+        "organisation",
         "name",
         "api_key",
         "created",

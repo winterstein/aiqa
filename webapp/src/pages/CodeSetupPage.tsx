@@ -83,7 +83,28 @@ function PythonCodeSetupPane({ apiKey }: { apiKey: ApiKey }) {
   return (
     <div>
       <h5>Python Integration Instructions</h5>
-      <p>Python setup and integration instructions will be displayed here.</p>
+      <h5>Install the Python client</h5>
+      <pre>
+pip install aiqa-client
+      </pre>
+	  <p>In .env or otherwise, set the API key:</p>
+	  <p><code>AIQA_API_KEY={apiKey?.id || 'your-api-key'}</code></p>
+      <h5>Trace your functions</h5>
+      <p>
+        Use the <code>@WithTracing</code> or <code>@WithTracingAsync</code> decorators from the client. For example:
+      </p>
+      <pre><code>{`from aiqa import get_client, WithTracing
+
+# Initialize the client
+client = get_client()
+
+@WithTracing
+def my_function(x):
+    return x * 2
+
+result = my_function(5)
+      `}</code></pre>
+
     </div>
   );
 }
@@ -92,13 +113,16 @@ function JavaScriptCodeSetupPane({ apiKey }: { apiKey: ApiKey }) {
   return (
     <div>
  <h5>Install the client-js library</h5>
-                  <p><code>npm install @aiqa/client-js</code></p>
-				  <p>In .env or otherwise, set the API key:</p>
-				  <p><code>AIQA_API_KEY="{apiKey?.id || 'your-api-key'}"</code></p>
-				  <h5>Wrap the functions you want to trace using the <code>withTracing</code> or <code>withTracingAsync</code> decorators</h5>
-				  <p><code>{`import { withTracing, withTracingAsync } from '@aiqa/client-js';`}<br/>
-const tracedFn = withTracing(fn);<br/>
-// Just use the tracedFn as normal instead of the original fn</code></p>
+<p><code>npm install @aiqa/client-js</code></p>
+<p>In .env or otherwise, set the API key:</p>
+<p><code>AIQA_API_KEY={apiKey?.id || 'your-api-key'}</code></p>
+<h5>Wrap the functions you want to trace using the <code>withTracing</code> or <code>withTracingAsync</code> decorators</h5>
+<pre><code>{`import { withTracing, withTracingAsync } from '@aiqa/client-js';
+
+const tracedFn = withTracing(fn);
+
+// Just use the tracedFn as normal instead of the original fn
+tracedFn(5);`}</code></pre>
 <h5>That's it!</h5>
 <p>For setting extra attributes and other features - please see <code>tracing.ts</code> in the client-js library.</p>
     </div>

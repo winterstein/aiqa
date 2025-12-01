@@ -80,7 +80,7 @@ tap.before(async () => {
   // Create test API key
   const apiKey = 'test-api-key-' + Date.now();
   await createApiKey({
-    organisation_id: testOrgId,
+    organisation: testOrgId,
   });
   testApiKey = apiKey;
 });

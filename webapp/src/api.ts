@@ -68,13 +68,13 @@ export async function getDataset(id: string) {
 
 export async function listDatasets(organisationId: string, query?: string) {
   const params = new URLSearchParams();
-  params.append('organisation_id', organisationId);
+  addOrganisationParam(params, organisationId);
   if (query) params.append('q', query);
   return fetchWithAuth(`/dataset?${params.toString()}`);
 }
 
 export async function createDataset(dataset: {
-  organisation_id: string;
+  organisation: string;
   name: string;
   description?: string;
   tags?: string[];
@@ -97,7 +97,7 @@ export async function createDataset(dataset: {
 			unit: 'tokens',
 		}];
 	}
-  return fetchWithAuth('/dataset?organisation_id=' + dataset.organisation_id, {
+  return fetchWithAuth('/dataset?organisation=' + dataset.organisation, {
     method: 'POST',
     body: JSON.stringify(dataset),
   });
@@ -110,13 +110,13 @@ export async function getExperiment(id: string) {
 
 export async function listExperiments(organisationId: string, query?: string) {
   const params = new URLSearchParams();
-  params.append('organisation_id', organisationId);
+  addOrganisationParam(params, organisationId);
   if (query) params.append('q', query);
   return fetchWithAuth(`/experiment?${params.toString()}`);
 }
 
 export async function createExperiment(experiment: {
-  organisation_id: string;
+  organisation: string;
   dataset_id: string;
   summary_results?: any;
 }) {
@@ -124,6 +124,10 @@ export async function createExperiment(experiment: {
     method: 'POST',
     body: JSON.stringify(experiment),
   });
+}
+
+function addOrganisationParam(params: URLSearchParams, organisationId: string) {
+  params.append('organisation', organisationId);
 }
 
 // Span endpoints (require API key authentication)
@@ -139,7 +143,7 @@ export async function searchSpans(args: {
   // In a real implementation, you'd need to get an API key for this organisation
   // For now, we'll construct the URL but note that authentication is needed
   const params = new URLSearchParams();
-  params.append('organisation_id', organisationId);
+  addOrganisationParam(params, organisationId);
   if (isRoot) {
 	if ( ! query) query = 'parentSpanId:unset';
 	else query = `(${query}) AND parentSpanId:unset`;
@@ -168,7 +172,7 @@ export async function searchInputs(
 ) {
   const { organisationId, datasetId, query, limit = 100, offset = 0 } = args;
   const params = new URLSearchParams();
-  params.append('organisation_id', organisationId);
+  addOrganisationParam(params, organisationId);
   if (query) params.append('q', query);
   if (datasetId) params.append('dataset_id', datasetId);
   params.append('limit', limit.toString());
@@ -208,13 +212,13 @@ export async function getOrCreateUser(email: string, name: string) {
 // API Key endpoints
 export async function listApiKeys(organisationId: string, query?: string) {
   const params = new URLSearchParams();
-  params.append('organisation_id', organisationId);
+  addOrganisationParam(params, organisationId);
   if (query) params.append('q', query);
   return fetchWithAuth(`/api-key?${params.toString()}`);
 }
 
 export async function createApiKey(apiKey: { 
-  organisation_id: string; 
+  organisation: string; 
   key: string;
   rate_limit_per_hour?: number;
   retention_period_days?: number;
@@ -222,6 +226,12 @@ export async function createApiKey(apiKey: {
   return fetchWithAuth('/api-key', {
     method: 'POST',
     body: JSON.stringify(apiKey),
+  });
+}
+
+export async function deleteApiKey(id: string) {
+  return fetchWithAuth(`/api-key/${id}`, {
+    method: 'DELETE',
   });
 }
 

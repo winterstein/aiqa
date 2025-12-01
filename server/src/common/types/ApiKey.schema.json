@@ -12,7 +12,7 @@
         "id": {
           "type": "string"
         },
-        "organisation_id": {
+        "organisation": {
           "type": "string"
         },
         "rate_limit_per_hour": {
@@ -28,7 +28,7 @@
       },
       "required": [
         "id",
-        "organisation_id",
+        "organisation",
         "created",
         "updated"
       ],

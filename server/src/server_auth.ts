@@ -16,7 +16,7 @@ import SearchQuery from './common/SearchQuery.js';
  */
 export interface AuthenticatedRequest extends FastifyRequest {
   authenticatedWith?: 'api_key' | 'jwt';
-  organisationId?: string;
+  organisation?: string;
   userId?: string;
   apiKeyId?: string;
 }
@@ -137,8 +137,8 @@ async function authenticateWithApiKey(
   }
 
   // Look up user from API key's organisation (API keys are tied to organisations)
-  // For API keys, we use the organisation_id directly from the API key record
-  request.organisationId = apiKey.organisation_id;
+  // For API keys, we use the organisation directly from the API key record
+  request.organisation = apiKey.organisation;
   request.apiKeyId = apiKey.id;
   request.authenticatedWith = 'api_key';
   return true;
@@ -195,16 +195,16 @@ async function authenticateWithJwt(
   const userId = user.id;
 
   // Check for optional organisationId parameter (query param or header)
-  const requestedOrgId = (request.query as any)?.organisationId || request.headers['x-organisation-id'];
+  const requestedOrg = (request.query as any)?.organisation || request.headers['x-organisation'];
   
-  if (requestedOrgId) {
+  if (requestedOrg) {
     // Verify user is a member of the requested organisation
-    const org = await getOrganisation(requestedOrgId);
+    const org = await getOrganisation(requestedOrg);
     if (!org || !org.members || !org.members.includes(userId)) {
       reply.code(403).send({ error: 'User is not a member of the specified organisation' });
       return false;
     }
-    request.organisationId = requestedOrgId;
+    request.organisation = requestedOrg;
   } else {
     // Get user's organisations and use the first one
     const organisations = await getOrganisationsForUser(userId);
@@ -213,7 +213,7 @@ async function authenticateWithJwt(
       return false;
     }
     // Use the first organisation (could be enhanced to allow selection)
-    request.organisationId = organisations[0].id;
+    request.organisation = organisations[0].id;
   }
 
   request.userId = userId;

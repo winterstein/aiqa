@@ -83,10 +83,10 @@ const ExperimentDetailsPage: React.FC = () => {
                 <strong>ID:</strong> <code>{experiment.id}</code>
               </p>
               <p>
-                <strong>Dataset ID:</strong> <code>{experiment.dataset_id}</code>
+                <strong>Dataset:</strong> <code>{experiment.dataset}</code>
               </p>
               <p>
-                <strong>Organisation ID:</strong> <code>{experiment.organisation_id}</code>
+                <strong>Organisation:</strong> <code>{experiment.organisation}</code>
               </p>
               <p>
                 <strong>Created:</strong> {new Date(experiment.created).toLocaleString()}

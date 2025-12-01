@@ -21,7 +21,7 @@ const DatasetListPage: React.FC = () => {
 
   const createDatasetMutation = useMutation({
     mutationFn: async (datasetData: {
-      organisation_id: string;
+      organisation: string;
       name: string;
       description?: string;
     }) => {
@@ -41,7 +41,7 @@ const DatasetListPage: React.FC = () => {
     if (!organisationId || !datasetName.trim()) return;
 
     createDatasetMutation.mutate({
-      organisation_id: organisationId,
+      organisation: organisationId,
       name: datasetName.trim(),
       description: datasetDescription.trim() || undefined,
     });

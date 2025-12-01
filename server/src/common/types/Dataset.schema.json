@@ -20,7 +20,7 @@
         "name": {
           "type": "string"
         },
-        "organisation_id": {
+        "organisation": {
           "type": "string"
         },
         "output_schema": {},
@@ -37,7 +37,7 @@
       },
       "required": [
         "id",
-        "organisation_id",
+        "organisation",
         "name",
         "created",
         "updated"

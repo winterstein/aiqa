@@ -24,10 +24,10 @@ let pool: Pool | null = null;
 const TABLE_FIELDS: Record<string, Set<string>> = {
 	organisations: new Set(['name', 'rate_limit_per_hour', 'retention_period_days', 'members']),
 	users: new Set(['email', 'name', 'sub']),
-	api_keys: new Set(['organisation_id', 'rate_limit_per_hour', 'retention_period_days']),
-	datasets: new Set(['organisation_id', 'name', 'description', 'tags', 'input_schema', 'output_schema', 'metrics']),
-	experiments: new Set(['dataset_id', 'organisation_id', 'summary_results']),
-	models: new Set(['organisation_id', 'name', 'api_key', 'version', 'description']),
+	api_keys: new Set(['organisation', 'rate_limit_per_hour', 'retention_period_days']),
+	datasets: new Set(['organisation', 'name', 'description', 'tags', 'input_schema', 'output_schema', 'metrics']),
+	experiments: new Set(['dataset', 'organisation', 'summary_results']),
+	models: new Set(['organisation', 'name', 'api_key', 'version', 'description']),
 };
 
 /**
@@ -135,33 +135,33 @@ export async function createSchema(): Promise<void> {
 
 	// Create api_keys table
 	await query(generatePostgresTable('ApiKey', apiKeySchema, {
-		organisation_id: 'UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE'
+		organisation: 'UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE'
 	}, []));
 
 	// Create models table
 	await query(generatePostgresTable('Model', modelSchema, {
-		organisation_id: 'UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE'
+		organisation: 'UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE'
 	}, []));
 
 	// Create datasets table
 	await query(generatePostgresTable('Dataset', datasetSchema, {
-		organisation_id: 'UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE'
+		organisation: 'UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE'
 	}, [
-		'UNIQUE(organisation_id, name)'
+		'UNIQUE(organisation, name)'
 	]));
 
 	// Create experiments table
 	await query(generatePostgresTable('Experiment', experimentSchema, {
-		dataset_id: 'UUID NOT NULL REFERENCES datasets(id) ON DELETE CASCADE',
-		organisation_id: 'UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE'
+		dataset: 'UUID NOT NULL REFERENCES datasets(id) ON DELETE CASCADE',
+		organisation: 'UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE'
 	}, []));
 
 	// Create indexes
-	await query(`CREATE INDEX IF NOT EXISTS idx_api_keys_organisation_id ON api_keys(organisation_id)`);
-	await query(`CREATE INDEX IF NOT EXISTS idx_models_organisation_id ON models(organisation_id)`);
-	await query(`CREATE INDEX IF NOT EXISTS idx_datasets_organisation_id ON datasets(organisation_id)`);
-	await query(`CREATE INDEX IF NOT EXISTS idx_experiments_dataset_id ON experiments(dataset_id)`);
-	await query(`CREATE INDEX IF NOT EXISTS idx_experiments_organisation_id ON experiments(organisation_id)`);
+		await query(`CREATE INDEX IF NOT EXISTS idx_api_keys_organisation ON api_keys(organisation)`);
+	await query(`CREATE INDEX IF NOT EXISTS idx_models_organisation ON models(organisation)`);
+	await query(`CREATE INDEX IF NOT EXISTS idx_datasets_organisation ON datasets(organisation)`);
+	await query(`CREATE INDEX IF NOT EXISTS idx_experiments_dataset ON experiments(dataset)`);
+	await query(`CREATE INDEX IF NOT EXISTS idx_experiments_organisation ON experiments(organisation)`);
 
 	// Add sub column to users table if it doesn't exist (migration)
 	await query(`
@@ -209,7 +209,7 @@ async function listEntities<T extends QueryResultRow>(
 	const params: any[] = [];
 
 	if (organisationId) {
-		whereClause += ` AND organisation_id = $1`;
+		whereClause += ` AND organisation = $1`;
 		params.push(organisationId);
 	}
 
@@ -226,8 +226,19 @@ async function createEntity<T extends QueryResultRow>(
 	const filteredItem = filterFields(tableName, item);
 	const fields = Object.keys(filteredItem);
 	let values = fields.map(field => filteredItem[field]);
-	// convert Object values to JSON strings for storage
-	values = values.map(value => typeof value === 'object' ? JSON.stringify(value) : value);
+	// convert Object values to JSON strings for storage, but pass arrays directly (PostgreSQL handles them)
+	values = values.map(value => {
+		if (value === null || value === undefined) {
+			return value;
+		}
+		if (Array.isArray(value)) {
+			return value; // Pass arrays directly - PostgreSQL pg library handles them correctly
+		}
+		if (typeof value === 'object') {
+			return JSON.stringify(value);
+		}
+		return value;
+	});
 	const placeholders = fields.map((_, i) => `$${i + 1}`).join(', ');
 	const result = await query<T>(
 		`INSERT INTO ${tableName} (${fields.join(', ')}) VALUES (${placeholders}) RETURNING *`,
@@ -249,8 +260,19 @@ async function updateEntity<T extends QueryResultRow>(
 	}
 
 	let values = fields.map(field => filteredItem[field]);
-	// convert Object values to JSON strings for storage
-	values = values.map(value => typeof value === 'object' ? JSON.stringify(value) : value);
+	// convert Object values to JSON strings for storage, but pass arrays directly (PostgreSQL handles them)
+	values = values.map(value => {
+		if (value === null || value === undefined) {
+			return value;
+		}
+		if (Array.isArray(value)) {
+			return value; // Pass arrays directly - PostgreSQL pg library handles them correctly
+		}
+		if (typeof value === 'object') {
+			return JSON.stringify(value);
+		}
+		return value;
+	});
 
 	const setClause = fields.map((field, i) => `${field} = $${i + 1}`).join(', ');
 	const idParam = `$${fields.length + 1}`;

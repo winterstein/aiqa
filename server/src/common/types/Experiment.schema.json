@@ -9,13 +9,13 @@
           "format": "date-time",
           "type": "string"
         },
-        "dataset_id": {
+        "dataset": {
           "type": "string"
         },
         "id": {
           "type": "string"
         },
-        "organisation_id": {
+        "organisation": {
           "type": "string"
         },
         "summary_results": {},
@@ -26,8 +26,8 @@
       },
       "required": [
         "id",
-        "dataset_id",
-        "organisation_id",
+        "dataset",
+        "organisation",
         "summary_results",
         "created",
         "updated"

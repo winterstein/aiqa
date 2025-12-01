@@ -7,7 +7,7 @@ export interface Metric {
 
 export interface Dataset {
   id: string;
-  organisation_id: string;
+  organisation: string;
   name: string;
   description?: string;
   tags?: string[];

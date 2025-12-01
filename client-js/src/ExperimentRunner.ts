@@ -26,7 +26,7 @@ export class ExperimentRunner {
 	private datasetId: string;
 	private serverUrl: string;
 	private apiKey: string;
-	private organisationId?: string;
+	private organisation?: string;
 	private experimentId?: string;
 	private scores: Array<{ example: Example; result: any; scores: ScoreResult }> = [];
 
@@ -34,7 +34,7 @@ export class ExperimentRunner {
 		this.datasetId = options.datasetId;
 		this.serverUrl = (options.serverUrl || process.env.AIQA_SERVER_URL).replace(/\/$/, '');
 		this.apiKey = options.apiKey || process.env.AIQA_API_KEY || '';
-		this.organisationId = options.organisationId;
+		this.organisation = options.organisation;
 	}
 	
 
@@ -44,8 +44,8 @@ export class ExperimentRunner {
 	async getExampleInputs(): Promise<Example[]> {
 		const params = new URLSearchParams();
 		params.append('dataset_id', this.datasetId);
-		if (this.organisationId) {
-			params.append('organisation_id', this.organisationId);
+		if (this.organisation) {
+			params.append('organisation', this.organisation);
 		}
 		params.append('limit', '10000'); // Fetch big - probably all the examples
 
