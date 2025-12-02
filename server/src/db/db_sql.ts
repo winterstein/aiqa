@@ -241,13 +241,17 @@ async function createEntity<T extends QueryResultRow>(
 	const filteredItem = filterFields(tableName, item);
 	const fields = Object.keys(filteredItem);
 	let values = fields.map(field => filteredItem[field]);
-	// convert Object values to JSON strings for storage, but pass arrays directly (PostgreSQL handles them)
+	// convert Object values to JSON strings for storage
+	// Pass string arrays directly (TEXT[]), but JSON.stringify arrays containing objects (JSONB)
 	values = values.map(value => {
 		if (value === null || value === undefined) {
 			return value;
 		}
 		if (Array.isArray(value)) {
-			return value; // Pass arrays directly - PostgreSQL pg library handles them correctly
+			// Check if array contains objects - if so, stringify for JSONB columns
+			// String arrays (TEXT[]) can be passed directly
+			const containsObjects = value.some(item => item !== null && typeof item === 'object' && !Array.isArray(item));
+			return containsObjects ? JSON.stringify(value) : value;
 		}
 		if (typeof value === 'object') {
 			return JSON.stringify(value);
@@ -275,13 +279,17 @@ async function updateEntity<T extends QueryResultRow>(
 	}
 
 	let values = fields.map(field => filteredItem[field]);
-	// convert Object values to JSON strings for storage, but pass arrays directly (PostgreSQL handles them)
+	// convert Object values to JSON strings for storage
+	// Pass string arrays directly (TEXT[]), but JSON.stringify arrays containing objects (JSONB)
 	values = values.map(value => {
 		if (value === null || value === undefined) {
 			return value;
 		}
 		if (Array.isArray(value)) {
-			return value; // Pass arrays directly - PostgreSQL pg library handles them correctly
+			// Check if array contains objects - if so, stringify for JSONB columns
+			// String arrays (TEXT[]) can be passed directly
+			const containsObjects = value.some(item => item !== null && typeof item === 'object' && !Array.isArray(item));
+			return containsObjects ? JSON.stringify(value) : value;
 		}
 		if (typeof value === 'object') {
 			return JSON.stringify(value);

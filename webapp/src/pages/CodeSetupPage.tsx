@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Container, Row, Col, Card, CardBody, CardHeader, Nav, NavItem, NavLink, TabContent, TabPane } from 'reactstrap';
-import { listApiKeys } from '../api';
+import { API_BASE_URL, listApiKeys } from '../api';
 import { useQuery } from '@tanstack/react-query';
 import { ApiKey } from '../common/types';
 
@@ -87,8 +87,9 @@ function PythonCodeSetupPane({ apiKey }: { apiKey: ApiKey }) {
       <pre>
 pip install aiqa-client
       </pre>
-	  <p>In .env or otherwise, set the API key:</p>
-	  <p><code>AIQA_API_KEY={apiKey?.id || 'your-api-key'}</code></p>
+	  <p>In .env or otherwise, set the API key and server URL:</p>
+	  <p><code>AIQA_API_KEY={apiKey?.id || 'your-api-key'}<br/>
+AIQA_SERVER_URL={API_BASE_URL}</code></p>
       <h5>Trace your functions</h5>
       <p>
         Use the <code>@WithTracing</code> or <code>@WithTracingAsync</code> decorators from the client. For example:
@@ -114,8 +115,9 @@ function JavaScriptCodeSetupPane({ apiKey }: { apiKey: ApiKey }) {
     <div>
  <h5>Install the client-js library</h5>
 <p><code>npm install @aiqa/client-js</code></p>
-<p>In .env or otherwise, set the API key:</p>
-<p><code>AIQA_API_KEY={apiKey?.id || 'your-api-key'}</code></p>
+<p>In .env or otherwise, set the API key and server URL:</p>
+<p><code>AIQA_API_KEY={apiKey?.id || 'your-api-key'}<br/>
+AIQA_SERVER_URL={API_BASE_URL}</code></p>
 <h5>Wrap the functions you want to trace using the <code>withTracing</code> or <code>withTracingAsync</code> decorators</h5>
 <pre><code>{`import { withTracing, withTracingAsync } from '@aiqa/client-js';
 

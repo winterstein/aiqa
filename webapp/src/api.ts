@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_AIQA_SERVER_URL || 'http://localhost:4001';
+export const API_BASE_URL = import.meta.env.VITE_AIQA_SERVER_URL || 'http://localhost:4001';
 
 // Token getter function - will be set by Auth0Provider wrapper
 let getAccessToken: (() => Promise<string | undefined>) | null = null;

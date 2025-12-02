@@ -5,3 +5,6 @@ server/dist
 webapp/node_modules
 client-js/node_modules
 .vscode
+.cursorignore
+client-js/.tap
+server/.tap

@@ -128,12 +128,12 @@ fastify.get('/span', { preHandler: authenticate }, async (request: Authenticated
 });
 
 // ===== ORGANISATION ENDPOINTS (PostgreSQL) =====
-fastify.post('/organisation', async (request, reply) => {
+fastify.post('/organisation', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const org = await createOrganisation(request.body as any);
   return org;
 });
 
-fastify.get('/organisation/:id', async (request, reply) => {
+fastify.get('/organisation/:id', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const { id } = request.params as { id: string };
   const org = await getOrganisation(id);
   if (!org) {
@@ -143,14 +143,14 @@ fastify.get('/organisation/:id', async (request, reply) => {
   return org;
 });
 
-fastify.get('/organisation', async (request, reply) => {
+fastify.get('/organisation', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const query = (request.query as any).q as string | undefined;
   const searchQuery = query ? new SearchQuery(query) : null;
   const orgs = await listOrganisations(searchQuery);
   return orgs;
 });
 
-fastify.put('/organisation/:id', async (request, reply) => {
+fastify.put('/organisation/:id', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const { id } = request.params as { id: string };
   const org = await updateOrganisation(id, request.body as any);
   if (!org) {
@@ -160,7 +160,7 @@ fastify.put('/organisation/:id', async (request, reply) => {
   return org;
 });
 
-fastify.delete('/organisation/:id', async (request, reply) => {
+fastify.delete('/organisation/:id', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const { id } = request.params as { id: string };
   const deleted = await deleteOrganisation(id);
   if (!deleted) {
@@ -210,7 +210,7 @@ fastify.get('/user/:id', async (request, reply) => {
   return user;
 });
 
-fastify.get('/user', async (request, reply) => {
+fastify.get('/user', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const query = (request.query as any).q as string | undefined;
   const searchQuery = query ? new SearchQuery(query) : null;
   const users = await listUsers(searchQuery);
@@ -254,7 +254,7 @@ fastify.put('/user/:id', async (request, reply) => {
   return user;
 });
 
-fastify.delete('/user/:id', async (request, reply) => {
+fastify.delete('/user/:id', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const { id } = request.params as { id: string };
   const deleted = await deleteUser(id);
   if (!deleted) {
@@ -265,7 +265,7 @@ fastify.delete('/user/:id', async (request, reply) => {
 });
 
 // ===== API KEY ENDPOINTS (PostgreSQL) =====
-fastify.post('/api-key', async (request, reply) => {
+fastify.post('/api-key', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const body = request.body as any;
   const apiKey = await createApiKey({
     ...body
@@ -274,7 +274,7 @@ fastify.post('/api-key', async (request, reply) => {
   return apiKey;
 });
 
-fastify.get('/api-key/:id', async (request, reply) => {
+fastify.get('/api-key/:id', {preHandler: authenticate}, async (request: AuthenticatedRequest, reply) => {
   const { id } = request.params as { id: string };
   const apiKey = await getApiKey(id);
   if (!apiKey) {
@@ -284,7 +284,7 @@ fastify.get('/api-key/:id', async (request, reply) => {
   return apiKey;
 });
 
-fastify.get('/api-key', async (request, reply) => {
+fastify.get('/api-key', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const organisationId = (request.query as any).organisation as string | undefined;
   if (!organisationId) {
     reply.code(400).send({ error: 'organisation query parameter is required' });
@@ -296,7 +296,7 @@ fastify.get('/api-key', async (request, reply) => {
   return apiKeys;
 });
 
-fastify.put('/api-key/:id', async (request, reply) => {
+fastify.put('/api-key/:id', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const { id } = request.params as { id: string };
   const apiKey = await updateApiKey(id, request.body as any);
   if (!apiKey) {
@@ -306,7 +306,7 @@ fastify.put('/api-key/:id', async (request, reply) => {
   return apiKey;
 });
 
-fastify.delete('/api-key/:id', async (request, reply) => {
+fastify.delete('/api-key/:id', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const { id } = request.params as { id: string };
   const deleted = await deleteApiKey(id);
   if (!deleted) {
@@ -317,7 +317,7 @@ fastify.delete('/api-key/:id', async (request, reply) => {
 });
 
 // ===== DATASET ENDPOINTS (PostgreSQL) =====
-fastify.post('/dataset', async (request, reply) => {
+fastify.post('/dataset', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
 	const organisationId = (request.query as any).organisation as string | undefined;
   if (!organisationId) {
     reply.code(400).send({ error: 'organisation query parameter is required' });
@@ -327,7 +327,7 @@ fastify.post('/dataset', async (request, reply) => {
   return dataset;
 });
 
-fastify.get('/dataset/:id', async (request, reply) => {
+fastify.get('/dataset/:id', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const { id } = request.params as { id: string };
   const dataset = await getDataset(id);
   if (!dataset) {
@@ -337,7 +337,7 @@ fastify.get('/dataset/:id', async (request, reply) => {
   return dataset;
 });
 
-fastify.get('/dataset', async (request, reply) => {
+fastify.get('/dataset', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const organisationId = (request.query as any).organisation as string | undefined;
   if (!organisationId) {
     reply.code(400).send({ error: 'organisation query parameter is required' });
@@ -349,7 +349,7 @@ fastify.get('/dataset', async (request, reply) => {
   return datasets;
 });
 
-fastify.put('/dataset/:id', async (request, reply) => {
+fastify.put('/dataset/:id', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const { id } = request.params as { id: string };
   const dataset = await updateDataset(id, request.body as any);
   if (!dataset) {
@@ -359,7 +359,7 @@ fastify.put('/dataset/:id', async (request, reply) => {
   return dataset;
 });
 
-fastify.delete('/dataset/:id', async (request, reply) => {
+fastify.delete('/dataset/:id', { preHandler: authenticate }, async (request, reply) => {
   const { id } = request.params as { id: string };
   const deleted = await deleteDataset(id);
   if (!deleted) {
@@ -413,12 +413,12 @@ fastify.get('/input', { preHandler: authenticate }, async (request: Authenticate
 });
 
 // ===== EXPERIMENT ENDPOINTS (PostgreSQL) =====
-fastify.post('/experiment', async (request, reply) => {
+fastify.post('/experiment', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const experiment = await createExperiment(request.body as any);
   return experiment;
 });
 
-fastify.get('/experiment/:id', async (request, reply) => {
+fastify.get('/experiment/:id', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const { id } = request.params as { id: string };
   const experiment = await getExperiment(id);
   if (!experiment) {
@@ -428,7 +428,7 @@ fastify.get('/experiment/:id', async (request, reply) => {
   return experiment;
 });
 
-fastify.get('/experiment', async (request, reply) => {
+fastify.get('/experiment', { preHandler: authenticate }, async (request, reply) => {
   const organisationId = (request.query as any).organisation as string | undefined;
   if (!organisationId) {
     reply.code(400).send({ error: 'organisation query parameter is required' });
@@ -440,7 +440,7 @@ fastify.get('/experiment', async (request, reply) => {
   return experiments;
 });
 
-fastify.put('/experiment/:id', async (request, reply) => {
+fastify.put('/experiment/:id', { preHandler: authenticate }, async (request, reply) => {
   const { id } = request.params as { id: string };
   const experiment = await updateExperiment(id, request.body as any);
   if (!experiment) {
@@ -450,7 +450,7 @@ fastify.put('/experiment/:id', async (request, reply) => {
   return experiment;
 });
 
-fastify.delete('/experiment/:id', async (request, reply) => {
+fastify.delete('/experiment/:id', { preHandler: authenticate }, async (request, reply) => {
   const { id } = request.params as { id: string };
   const deleted = await deleteExperiment(id);
   if (!deleted) {
@@ -461,13 +461,13 @@ fastify.delete('/experiment/:id', async (request, reply) => {
 });
 
 // ===== ORGANISATION MEMBER ENDPOINTS =====
-fastify.post('/organisation/:organisationId/member/:userId', async (request, reply) => {
+fastify.post('/organisation/:organisationId/member/:userId',{ preHandler: authenticate }, async (request, reply) => {
   const { organisationId, userId } = request.params as { organisationId: string; userId: string };
   const organisation = await addOrganisationMember(organisationId, userId);
   return organisation;
 });
 
-fastify.delete('/organisation/:organisationId/member/:userId', async (request, reply) => {
+fastify.delete('/organisation/:organisationId/member/:userId', { preHandler: authenticate }, async (request, reply) => {
   const { organisationId, userId } = request.params as { organisationId: string; userId: string };
   const deleted = await removeOrganisationMember(organisationId, userId);
   if (!deleted) {
@@ -477,7 +477,7 @@ fastify.delete('/organisation/:organisationId/member/:userId', async (request, r
   return { success: true };
 });
 
-fastify.get('/organisation/:organisationId/member', async (request, reply) => {
+fastify.get('/organisation/:organisationId/member', { preHandler: authenticate }, async (request, reply) => {
   const { organisationId } = request.params as { organisationId: string };
   const members = await getOrganisationMembers(organisationId);
   return members;
