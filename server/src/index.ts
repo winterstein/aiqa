@@ -39,7 +39,7 @@ import {
   searchSpans,
   searchInputs,
 } from './db/db_es.js';
-import { authenticate, AuthenticatedRequest } from './server_auth.js';
+import { authenticate, authenticateWithJwtFromHeader, AuthenticatedRequest } from './server_auth.js';
 import SearchQuery from './common/SearchQuery.js';
 import { Span } from './common/types/index.js';
 
@@ -172,12 +172,36 @@ fastify.delete('/organisation/:id', async (request, reply) => {
 
 // ===== USER ENDPOINTS (PostgreSQL) =====
 fastify.post('/user', async (request, reply) => {
-  const user = await createUser(request.body as any);
+  // get details from JWT token
+  let jwtToken = await authenticateWithJwtFromHeader(request);
+  if (!jwtToken) {
+    reply.code(401).send({ error: 'Invalid JWT token' });
+    return;
+  }
+  const newUser = request.body as any;
+  newUser.email = jwtToken.email;
+  newUser.sub = jwtToken.userId;
+  
+  if (!newUser.name) {
+    newUser.name = newUser.email.split('@')[0];
+  }
+  
+  console.log("creating user: "+newUser.email+" "+newUser.sub+" from JWT token "+JSON.stringify(jwtToken));
+  const user = await createUser(newUser);
   return user;
 });
 
 fastify.get('/user/:id', async (request, reply) => {
-  const { id } = request.params as { id: string };
+	let jwtToken = await authenticateWithJwtFromHeader(request);
+  let { id } = request.params as { id: string };
+  if (id === "jwt") {
+    const sub = jwtToken.userId;
+	const users = await listUsers(new SearchQuery(`sub:${sub}`));
+	if (users.length === 0) {
+		reply.code(404).send({ error: 'User not found with sub: '+sub });		
+	}
+	return users[0];
+  }
   const user = await getUser(id);
   if (!user) {
     reply.code(404).send({ error: 'User not found' });
@@ -194,7 +218,34 @@ fastify.get('/user', async (request, reply) => {
 });
 
 fastify.put('/user/:id', async (request, reply) => {
-  const { id } = request.params as { id: string };
+	let jwtToken = await authenticateWithJwtFromHeader(request);
+	if (!jwtToken) {
+    reply.code(401).send({ error: 'Invalid JWT token' });
+    return;
+  }  
+  let { id } = request.params as { id: string };
+  if (id === "jwt") {
+    id = jwtToken.userId;
+  }
+  // Authorization check: user can only update themselves
+  // Get the user being updated and verify JWT token matches
+  const targetUser = await getUser(id);
+  if (!targetUser) {
+    reply.code(404).send({ error: 'User not found' });
+    return;
+  }
+  
+  // Verify the JWT token matches the user being updated
+  const tokenMatches = 
+    (jwtToken.userId && targetUser.sub === jwtToken.userId) ||
+    (jwtToken.email && targetUser.email === jwtToken.email);
+  
+  if (!tokenMatches) {
+    reply.code(403).send({ error: 'You can only update your own user profile' });
+    return;
+  }
+  
+  console.log("updating user: "+id+" from JWT token "+JSON.stringify(jwtToken));
   const user = await updateUser(id, request.body as any);
   if (!user) {
     reply.code(404).send({ error: 'User not found' });

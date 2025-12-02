@@ -28,8 +28,7 @@
       },
       "required": [
         "id",
-        "email",
-        "name",
+        "sub",
         "created",
         "updated"
       ],

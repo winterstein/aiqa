@@ -176,6 +176,21 @@ export async function createSchema(): Promise<void> {
       END IF;
     END $$;
   `);
+
+	// Allow NULL emails in users table (migration)
+	await query(`
+    DO $$ 
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'users' 
+        AND column_name = 'email' 
+        AND is_nullable = 'NO'
+      ) THEN
+        ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
+      END IF;
+    END $$;
+  `);
 }
 
 /**

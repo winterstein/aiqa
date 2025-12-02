@@ -65,7 +65,7 @@ export function jsonSchemaToPostgresType(prop: any, fieldName: string): string {
         return 'VARCHAR(255) NOT NULL UNIQUE';
       }
       if (fieldName === 'email') {
-        return 'VARCHAR(255) NOT NULL UNIQUE';
+        return 'VARCHAR(255)'; // allow null and non-unique -- as sub is the login auth key
       }
       if (fieldName === 'name') {
         return 'VARCHAR(255) NOT NULL';
