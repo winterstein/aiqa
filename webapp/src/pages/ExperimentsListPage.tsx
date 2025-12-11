@@ -40,14 +40,17 @@ const ExperimentsListPage: React.FC = () => {
       (a, b) => new Date(a.created).getTime() - new Date(b.created).getTime()
     );
     
-    return sortedExperiments.map((exp: Experiment) => {
-      const date = new Date(exp.created).toLocaleDateString();
+    return sortedExperiments.map((exp: Experiment, index: number) => {
+      const date = new Date(exp.created);
+      // Use consistent date format with time to distinguish between experiments on same day
+      const dateLabel = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + 
+                       ' ' + date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
       const summary = exp.summary_results || {};
       
       // Extract common metrics from summary_results
       // Handle various possible structures
       return {
-        name: date,
+        name: dateLabel,
         latency: summary.latency || summary.avg_latency || summary.mean_latency || null,
         cost: summary.cost || summary.avg_cost || summary.total_cost || null,
         quality: summary.quality || summary.quality_score || summary.avg_quality || null,
@@ -62,6 +65,16 @@ const ExperimentsListPage: React.FC = () => {
   const hasCost = chartData.some(d => d.cost !== null && d.cost !== undefined);
   const hasQuality = chartData.some(d => d.quality !== null && d.quality !== undefined);
   const hasAnyMetrics = hasLatency || hasCost || hasQuality;
+
+  // Calculate column width based on number of metrics displayed
+  const getChartColumnWidth = () => {
+    const metricsCount = [hasLatency, hasCost, hasQuality].filter(Boolean).length;
+    if (metricsCount === 0) return 12;
+    if (metricsCount === 1) return 12;
+    if (metricsCount === 2) return 6;
+    return 4; // 3 metrics
+  };
+  const chartColWidth = getChartColumnWidth();
 
   if (isLoading) {
     return (
@@ -126,7 +139,7 @@ const ExperimentsListPage: React.FC = () => {
               <CardBody>
                 <Row>
                   {hasLatency && (
-                    <Col md={hasQuality || hasCost ? 4 : 12} className="mb-4">
+                    <Col md={chartColWidth} className="mb-4">
                       <h6 className="text-center">Latency</h6>
                       <ResponsiveContainer width="100%" height={250}>
                         <LineChart data={chartData}>
@@ -147,7 +160,7 @@ const ExperimentsListPage: React.FC = () => {
                     </Col>
                   )}
                   {hasCost && (
-                    <Col md={hasLatency || hasQuality ? 4 : 12} className="mb-4">
+                    <Col md={chartColWidth} className="mb-4">
                       <h6 className="text-center">Cost</h6>
                       <ResponsiveContainer width="100%" height={250}>
                         <LineChart data={chartData}>
@@ -168,7 +181,7 @@ const ExperimentsListPage: React.FC = () => {
                     </Col>
                   )}
                   {hasQuality && (
-                    <Col md={hasLatency || hasCost ? 4 : 12} className="mb-4">
+                    <Col md={chartColWidth} className="mb-4">
                       <h6 className="text-center">Quality Score</h6>
                       <ResponsiveContainer width="100%" height={250}>
                         <LineChart data={chartData}>
