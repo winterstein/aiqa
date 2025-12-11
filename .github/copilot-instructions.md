@@ -86,9 +86,9 @@ npm run dev          # Run with ts-node
 
 ### Python Client
 ```bash
-pip install -r requirements.txt  # Install dependencies
-pip install -e .                  # Install in development mode
-python example.py                 # Run example
+pip install -r requirements.txt       # Install core dependencies
+pip install -e .                       # Install in development mode
+python example.py                      # Run example (requires requirements.examples.txt)
 ```
 
 ## API Architecture
