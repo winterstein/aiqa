@@ -46,15 +46,16 @@ AIQA is an AI Quality Assurance tracing system built on OpenTelemetry. It consis
 
 ### Server Structure
 - `src/common/types/` - TypeScript type definitions (shared with webapp)
-- `src/db_sql.ts` - PostgreSQL database operations
-- `src/db_es.ts` - ElasticSearch database operations
+- `src/db/db_sql.ts` - PostgreSQL database operations
+- `src/db/db_es.ts` - ElasticSearch database operations
 - Use a single type per database table/index
 - Type definitions belong in `Types.ts` files in the types directory
 - Avoid code duplication - write reusable functions
 
 ### Web App Structure
 - `src/common/` - Symlink to server's common directory (shared code)
-- `src/app/` - Most pages and components
+- `src/pages/` - Page components
+- `src/components/` - Reusable UI components
 
 ## Development Workflow
 
@@ -176,16 +177,17 @@ python example.py                 # Run example
 
 ### Adding New Database Tables (Server)
 1. Define type in appropriate `Types.ts`
-2. Add schema creation in `db_sql.ts` or `db_es.ts`
+2. Add schema creation in `src/db/db_sql.ts` or `src/db/db_es.ts`
 3. Add CRUD operations
 4. Create corresponding API endpoint
 
 ### Adding New Pages (Web App)
-1. Create component in `src/app/`
-2. Add route in router configuration
-3. Support deep-linking URL structure
-4. Use React Query for data fetching
-5. Use rerenderer for complex state
+1. Create page component in `src/pages/`
+2. Add reusable components in `src/components/`
+3. Add route in router configuration
+4. Support deep-linking URL structure
+5. Use React Query for data fetching
+6. Use rerenderer for complex state
 
 ### Adding Tracing to Applications
 1. Import appropriate client library
