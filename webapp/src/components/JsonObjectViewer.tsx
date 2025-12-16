@@ -8,11 +8,34 @@
 import React from 'react';
 
 export default function JsonObjectViewer({ json }: { json: any }) {
-    return (
-        <div>
-            <pre>{JSON.stringify(json, null, 2)}</pre>
-            <button onClick={() => navigator.clipboard.writeText(JSON.stringify(json))}>Copy JSON</button>
-            <button onClick={() => navigator.clipboard.writeText(JSON.stringify(json, null, 2))}>Copy Pretty</button>
-        </div>
-    );
+	const $copyButton = <button onClick={() => navigator.clipboard.writeText(JSON.stringify(json, null, 2))}>Copy JSON</button>;
+	if (Array.isArray(json)) {
+		return (
+			<div>
+				<h2>Array</h2>
+				<pre>{JSON.stringify(json, null, 2)}</pre>
+				{$copyButton}
+			</div>
+		);
+	}
+	if (typeof(json) === 'object') {
+		return (
+			<div>
+				{Object.entries(json).map(([key, value]) => {
+					return (
+						<div key={key}>
+							<span>{key}</span>
+							<JsonObjectViewer json={value} />
+						</div>
+					);
+
+				})}
+				{$copyButton}
+			</div>
+		);
+	}
+	if (json === null || json === undefined) {
+		return null;
+	}
+	return ""+json;
 }
