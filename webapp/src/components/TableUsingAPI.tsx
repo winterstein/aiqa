@@ -7,6 +7,10 @@ import {
   flexRender,
   ColumnDef,
   SortingState,
+  HeaderGroup,
+  Header,
+  Row,
+  Cell,
 } from '@tanstack/react-table';
 import { Input, Table, Pagination, PaginationItem, PaginationLink, Card, CardBody, Button } from 'reactstrap';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -53,19 +57,19 @@ function TableUsingAPI<T extends Record<string, any>>({
   const offset = loadedData?.offset || 0;
   const limit = loadedData?.limit || pageSize;
 
-  // Debug logging
-  useEffect(() => {
-    console.log('[TableUsingAPI] Data state:', {
-      isLoading,
-      hasError: !!loadError,
-      error: loadError?.message,
-      hitsCount: hits.length,
-      total,
-      offset,
-      limit,
-      firstHit: hits[0] ? { keys: Object.keys(hits[0]), sample: hits[0] } : null,
-    });
-  }, [isLoading, loadError, hits, total, offset, limit]);
+//   // Debug logging
+//   useEffect(() => {
+//     console.log('[TableUsingAPI] Data state:', {
+//       isLoading,
+//       hasError: !!loadError,
+//       error: loadError?.message,
+//       hitsCount: hits.length,
+//       total,
+//       offset,
+//       limit,
+//       firstHit: hits[0] ? { keys: Object.keys(hits[0]), sample: hits[0] } : null,
+//     });
+//   }, [isLoading, loadError, hits, total, offset, limit]);
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['table-data', serverQuery] });
@@ -101,35 +105,35 @@ function TableUsingAPI<T extends Record<string, any>>({
   const start = currentPage * pageSize;
   const paginatedRows = allRows.slice(start, start + pageSize);
   
-  // Debug logging
-  useEffect(() => {
-    console.log('[TableUsingAPI] Pagination:', {
-      totalRows: allRows.length,
-      currentPage,
-      pageSize,
-      start,
-      end: start + pageSize,
-      paginatedCount: paginatedRows.length,
-      paginatedRowIds: paginatedRows.map(r => r.id),
-      firstRowData: paginatedRows[0]?.original || null,
-      rowsArrayLength: allRows.length,
-      rowsArraySample: allRows.length > 0 ? { id: allRows[0].id, original: allRows[0].original } : null,
-    });
-  }, [allRows.length, currentPage, pageSize, paginatedRows.length]);
+//   // Debug logging
+//   useEffect(() => {
+//     console.log('[TableUsingAPI] Pagination:', {
+//       totalRows: allRows.length,
+//       currentPage,
+//       pageSize,
+//       start,
+//       end: start + pageSize,
+//       paginatedCount: paginatedRows.length,
+//       paginatedRowIds: paginatedRows.map(r => r.id),
+//       firstRowData: paginatedRows[0]?.original || null,
+//       rowsArrayLength: allRows.length,
+//       rowsArraySample: allRows.length > 0 ? { id: allRows[0].id, original: allRows[0].original } : null,
+//     });
+//   }, [allRows.length, currentPage, pageSize, paginatedRows.length]);
 
   const totalRows = allRows.length;
   const totalPages = Math.ceil(totalRows / pageSize);
   
-  useEffect(() => {
-    console.log('[TableUsingAPI] Table state:', {
-      totalRows,
-      totalPages,
-      columnsCount: columns.length,
-      columnIds: columns.map(c => c.id || (c as any).accessorKey),
-      globalFilter,
-      sorting,
-    });
-  }, [totalRows, totalPages, columns, globalFilter, sorting]);  
+//   useEffect(() => {
+//     console.log('[TableUsingAPI] Table state:', {
+//       totalRows,
+//       totalPages,
+//       columnsCount: columns.length,
+//       columnIds: columns.map(c => c.id || (c as any).accessorKey),
+//       globalFilter,
+//       sorting,
+//     });
+//   }, [totalRows, totalPages, columns, globalFilter, sorting]);  
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setServerQuery(e.target.value);
@@ -188,88 +192,13 @@ function TableUsingAPI<T extends Record<string, any>>({
               Showing {currentPage * pageSize + 1}-{Math.min((currentPage + 1) * pageSize, totalRows)} of {totalRows} items
             </p>
             <Table hover responsive>
-              <thead>
-                {table.getHeaderGroups().map((headerGroup) => (
-                  <tr key={headerGroup.id}>
-                    {headerGroup.headers.map((header) => (
-                      <th
-                        key={header.id}
-                        style={{
-                          cursor: header.column.getCanSort() ? 'pointer' : 'default',
-                          userSelect: 'none',
-                        }}
-                        onClick={header.column.getToggleSortingHandler()}
-                      >
-                        <div className="d-flex align-items-center">
-                          {flexRender(header.column.columnDef.header, header.getContext())}
-                          {header.column.getCanSort() && (
-                            <span className="ms-2">
-                              {{
-                                asc: ' ↑',
-                                desc: ' ↓',
-                              }[header.column.getIsSorted() as string] ?? ' ⇅'}
-                            </span>
-                          )}
-                        </div>
-                      </th>
-                    ))}
-                  </tr>
-                ))}
-              </thead>
-              <tbody>
-                {(() => {
-                  console.log('[TableUsingAPI] About to render tbody:', {
-                    paginatedRowsLength: paginatedRows.length,
-                    allRowsLength: allRows.length,
-                    totalRows,
-                    currentPage,
-                    pageSize,
-                    start,
-                    paginatedRowsArray: paginatedRows,
-                  });
-                  
-                  if (paginatedRows.length === 0) {
-                    console.warn('[TableUsingAPI] WARNING: paginatedRows is empty but totalRows is', totalRows);
-                    return (
-                      <tr>
-                        <td colSpan={columns.length} className="text-center text-muted">
-                          No rows to display (debug: totalRows={totalRows}, paginatedRows.length={paginatedRows.length})
-                        </td>
-                      </tr>
-                    );
-                  }
-                  
-                  return paginatedRows.map((row) => {
-                    const cells = row.getVisibleCells();
-                    console.log('[TableUsingAPI] Rendering row:', {
-                      rowId: row.id,
-                      cellsCount: cells.length,
-                      cellIds: cells.map(c => c.id),
-                      rowData: row.original,
-                    });
-                    
-                    return (
-                      <tr key={row.id}>
-                        {cells.map((cell) => {
-                          const rendered = flexRender(cell.column.columnDef.cell, cell.getContext());
-                          console.log('[TableUsingAPI] Rendering cell:', {
-                            cellId: cell.id,
-                            columnId: cell.column.id,
-                            rendered: rendered,
-                            hasContent: !!rendered,
-                          });
-                          
-                          return (
-                            <td key={cell.id}>
-                              {rendered}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    );
-                  });
-                })()}
-              </tbody>
+				<TableHeader headers={table.getHeaderGroups()} flexRender={flexRender} />
+                <TableBody
+                  paginatedRows={paginatedRows}
+                  columns={columns}
+                  totalRows={totalRows}
+                  flexRender={flexRender}
+                />
             </Table>
 
             <TablePagination totalPages={totalPages} currentPage={currentPage} handlePageChange={handlePageChange} />
@@ -279,6 +208,59 @@ function TableUsingAPI<T extends Record<string, any>>({
   );
 }
 
+function TableHeader<T>({ headers, flexRender }: { headers: HeaderGroup<T>[], flexRender: <TProps extends object>(comp: any, props: TProps) => React.ReactNode }) {
+	return ( <thead>
+		{headers.map((headerGroup) => (
+		  <tr key={headerGroup.id}>
+			{headerGroup.headers.map((header) => (
+			  <th
+				key={header.id}
+				style={{
+				  cursor: header.column.getCanSort() ? 'pointer' : 'default',
+				  userSelect: 'none',
+				}}
+				onClick={header.column.getToggleSortingHandler()}
+			  >
+				<div className="d-flex align-items-center">
+				  {flexRender(header.column.columnDef.header, header.getContext())}
+				  {header.column.getCanSort() && (
+					<span className="ms-2">
+					  {{
+						asc: ' ↑',
+						desc: ' ↓',
+					  }[header.column.getIsSorted() as string] ?? ' ⇅'}
+					</span>
+				  )}
+				</div>
+			  </th>
+			))}
+		  </tr>
+		))}
+	  </thead>
+	);
+}
+
+function TableBody<T>({ paginatedRows, columns, totalRows, flexRender }: { paginatedRows: Row<T>[], columns: ColumnDef<T>[], totalRows: number, flexRender: <TProps extends object>(comp: any, props: TProps) => React.ReactNode }) {
+	return (
+		<tbody>
+			{paginatedRows.map((row) => {
+				const cells = row.getVisibleCells();
+				return (
+				  <tr key={row.id}>
+					{cells.map((cell) => {
+					  const rendered = flexRender(cell.column.columnDef.cell, cell.getContext());
+					  return (
+						<td key={cell.id}>
+						  {rendered}
+						</td>
+					  );
+					})}
+				  </tr>
+				);
+			})}
+		</tbody>
+	);
+}
 
 function TablePagination({ totalPages, currentPage, handlePageChange }: { totalPages: number, currentPage: number, handlePageChange: (page: number) => void }) {
 	if (totalPages <= 1) return null;

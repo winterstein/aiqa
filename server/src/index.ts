@@ -1,8 +1,8 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import dotenv from 'dotenv';
-import { initPool, createSchema as createSqlSchema, closePool } from './db/db_sql.js';
-import { initClient, createSchema as createEsSchema, closeClient } from './db/db_es.js';
+import { initPool, createTables, closePool } from './db/db_sql.js';
+import { initClient, createIndices, closeClient } from './db/db_es.js';
 import {
   createOrganisation,
   getOrganisation,
@@ -35,13 +35,14 @@ import {
 } from './db/db_sql.js';
 import {
   bulkInsertSpans,
-  bulkInsertInputs,
+  bulkInsertExamples,
   searchSpans,
-  searchInputs,
+  searchExamples,
 } from './db/db_es.js';
 import { authenticate, authenticateWithJwtFromHeader, AuthenticatedRequest } from './server_auth.js';
 import SearchQuery from './common/SearchQuery.js';
-import { Span } from './common/types/index.js';
+import Span from './common/types/Span.js';
+import Example from './common/types/Example.js';
 
 dotenv.config();
 
@@ -55,18 +56,6 @@ const esUrl = process.env.ELASTICSEARCH_URL || 'http://localhost:9200';
 
 initPool(pgConnectionString);
 initClient(esUrl);
-
-// Create schemas on startup
-fastify.addHook('onReady', async () => {
-  try {
-    await createSqlSchema();
-    await createEsSchema();
-    fastify.log.info('Database schemas initialized');
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    fastify.log.error(`Error initializing schemas: ${message}`);
-  }
-});
 
 // Graceful shutdown
 const shutdown = async () => {
@@ -267,8 +256,24 @@ fastify.delete('/user/:id', { preHandler: authenticate }, async (request: Authen
 // ===== API KEY ENDPOINTS (PostgreSQL) =====
 fastify.post('/api-key', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const body = request.body as any;
+  
+  // Ensure we only accept key_hash, not key (security: frontend should hash before sending)
+  if (body.key) {
+    reply.code(400).send({ error: 'Cannot accept plaintext key. Send key_hash instead.' });
+    return;
+  }
+  
+  if (!body.key_hash) {
+    reply.code(400).send({ error: 'key_hash is required' });
+    return;
+  }
+  
   const apiKey = await createApiKey({
-    ...body
+    organisation: body.organisation,
+    name: body.name,
+    key_hash: body.key_hash,
+    rate_limit_per_hour: body.rate_limit_per_hour,
+    retention_period_days: body.retention_period_days,
   });
   
   return apiKey;
@@ -372,37 +377,44 @@ fastify.delete('/dataset/:id', { preHandler: authenticate }, async (request, rep
 // ===== EXAMPLE ENDPOINTS (ElasticSearch) =====
 fastify.post('/example', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const organisation = request.organisation!;
-  const inputs = request.body as Span | Span[];
+  const examples = request.body as Example | Example[];
 
-  const inputsArray = Array.isArray(inputs) ? inputs : [inputs];
+  const examplesArray = Array.isArray(examples) ? examples : [examples];
   
   // Validate dataset is present
-  for (const example of inputsArray) {
+  for (const example of examplesArray) {
     if (!example.dataset) {
-      reply.code(400).send({ error: 'dataset is required for input documents' });
+      reply.code(400).send({ error: 'dataset is required for example documents' });
       return;
     }
   }
   
-  // Add organisation to each input
-  const inputsWithOrg = inputsArray.map(input => ({
-    ...input,
+  // Add organisation and timestamps to each example
+  const now = new Date();
+  const examplesWithOrg = examplesArray.map(example => ({
+    ...example,
     organisation,
+    created: example.created || now,
+    updated: example.updated || now,
   }));
 
-  await bulkInsertInputs(inputsWithOrg);
-  return { success: true, count: inputsWithOrg.length };
+  await bulkInsertExamples(examplesWithOrg);
+  return { success: true, count: examplesWithOrg.length };
 });
 
-fastify.get('/input', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
-  const organisation = request.organisation!;
+fastify.get('/example', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
+  const organisationId = (request.query as any).organisation as string | undefined;
+  if (!organisationId) {
+    reply.code(400).send({ error: 'organisation query parameter is required' });
+    return;
+  }
   const query = (request.query as any).q as string | undefined;
   const datasetId = (request.query as any).dataset_id as string | undefined;
   const limit = parseInt((request.query as any).limit || '100');
   const offset = parseInt((request.query as any).offset || '0');
 
   const searchQuery = query ? new SearchQuery(query) : null;
-  const result = await searchInputs(searchQuery, organisation, datasetId, limit, offset);
+  const result = await searchExamples(searchQuery, organisationId, datasetId, limit, offset);
   
   return {
     hits: result.hits,
@@ -486,6 +498,17 @@ fastify.get('/organisation/:organisationId/member', { preHandler: authenticate }
 // Start server
 const start = async () => {
   try {
+    // Create schemas before server starts accepting requests
+    try {
+      await createTables();
+      await createIndices();
+      fastify.log.info('Database schemas initialized');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      fastify.log.error(`Error initializing schemas: ${message}`);
+      // Continue anyway - defensive code will create indices on-demand
+    }
+    
     // Register CORS plugin - allow all origins
     await fastify.register(cors, {
       origin: true,

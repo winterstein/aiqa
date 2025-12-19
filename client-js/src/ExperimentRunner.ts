@@ -2,17 +2,13 @@
  * ExperimentRunner - runs experiments on datasets and scores results
  */
 
+import { Example } from './common/types/Example';
+
 interface ExperimentRunnerOptions {
 	datasetId: string;
 	serverUrl?: string;
 	apiKey?: string;
 	organisationId?: string;
-}
-
-interface Example {
-	input: any;
-	id: string;
-
 }
 
 interface ScoreResult {
@@ -50,7 +46,7 @@ export class ExperimentRunner {
 		}
 		params.append('limit', '10000'); // Fetch big - probably all the examples
 
-		const response = await fetch(`${this.serverUrl}/input?${params.toString()}`, {
+		const response = await fetch(`${this.serverUrl}/example?${params.toString()}`, {
 			method: 'GET',
 			headers: {
 				'Content-Type': 'application/json',
@@ -90,7 +86,12 @@ export class ExperimentRunner {
 		const examples = await this.getExampleInputs();
 		
 		for (const example of examples) {
-			const input = example.input;
+			// Handle both spans array and inputs field
+			const input = example.inputs || (example.spans && example.spans.length > 0 ? example.spans[0].attributes?.input : undefined);
+			if (!input) {
+				console.warn('Example has no input field or spans with input attribute:', example);
+				continue;
+			}
 			const result = await Promise.resolve(engine(input));
 			await this.score(example, result);
 		}

@@ -13,7 +13,7 @@ tap.test('Elasticsearch: Insert and Query Spans', async t => {
 //   // Delete existing indices to ensure clean state
 // No - too dangerous - might delete real data
 //   await deleteIndex('spans');
-//   await deleteIndex('dataset_spans');
+//   await deleteIndex('DATASET_EXAMPLES');
   
   await createSchema();
 

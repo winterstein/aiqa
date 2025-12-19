@@ -6,8 +6,10 @@ const typesDir = path.join(__dirname, '../src/common/types');
 const outputDir = path.join(__dirname, '../src/common/types');
 
 // Types to generate schemas for (excluding index.ts)
-// Note: Span is excluded because it extends ReadableSpan which contains function types
-// that cannot be serialized to JSON schema. Span.schema.json is maintained manually.
+// Note: Span and Example are excluded because:
+// - Span extends ReadableSpan which contains function types that cannot be serialized to JSON schema
+// - Example references Span[], which causes the same issue
+// Both Span.schema.json and Example.schema.json are maintained manually.
 const typeFiles = [
   { file: 'Organisation.ts', type: 'Organisation' },
   { file: 'User.ts', type: 'User' },

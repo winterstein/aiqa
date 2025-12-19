@@ -19,6 +19,7 @@ import CodeSetupPage from './CodeSetupPage';
 import ExperimentCodePage from './ExperimentCodePage';
 import MetricsPage from './MetricsPage';
 import Layout from './Layout';
+import { ToastProvider } from '../utils/toast';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -226,11 +227,13 @@ const App: React.FC = () => {
       cacheLocation="localstorage"
     >
       <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <Auth0TokenSetup>
-            <AppRoutes />
-          </Auth0TokenSetup>
-        </BrowserRouter>
+        <ToastProvider>
+          <BrowserRouter>
+            <Auth0TokenSetup>
+              <AppRoutes />
+            </Auth0TokenSetup>
+          </BrowserRouter>
+        </ToastProvider>
       </QueryClientProvider>
     </Auth0Provider>
   );

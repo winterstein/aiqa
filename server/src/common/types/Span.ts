@@ -4,12 +4,10 @@ import { ReadableSpan } from '@opentelemetry/sdk-trace-base';
  * Span type extending OpenTelemetry's ReadableSpan interface.
  * Represents a completed span that can be read and exported.
  */
-export interface Span extends ReadableSpan {
+export default interface Span extends ReadableSpan {
 	/** Trace ID */
 	traceId: string;
-  organisation: string;  
-  /** Only set for spans in the `dataset_spans` index */
-  dataset?: string | string[];
+  organisation: string;
   /** Only set for spans in the `spans` index IF created during an experiment */
   experiment?: string;
   /** Client-set span ID (goes alongside OpenTelemetry span ID if provided) */

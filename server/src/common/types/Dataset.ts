@@ -3,9 +3,11 @@ export interface Metric {
   name: string;
   description?: string;
   unit?: string;
+  type: 'javascript' | 'llm'
+  parameters?: Record<string, any>;
 }
 
-export interface Dataset {
+export default interface Dataset {
   id: string;
   organisation: string;
   name: string;

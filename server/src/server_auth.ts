@@ -4,7 +4,7 @@
  */
 
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { getUser, getOrganisationsForUser, getOrganisation, listUsers, getApiKey } from './db/db_sql.js';
+import { getUser, getOrganisationsForUser, getOrganisation, listUsers, getApiKey, getApiKeyByHash } from './db/db_sql.js';
 import * as crypto from 'crypto';
 import * as jwt from 'jsonwebtoken';
 import * as jwksClient from 'jwks-rsa';
@@ -122,17 +122,29 @@ async function verifyJwtToken(token: string): Promise<JwtVerificationResult | nu
 }
 
 /**
+ * Hash an API key using SHA256.
+ */
+function hashApiKey(key: string): string {
+	return crypto.createHash('sha256').update(key).digest('hex');
+}
+
+/**
  * Authenticate using API key.
+ * The incoming key is hashed and compared against stored key_hash values.
  */
 async function authenticateWithApiKey(
 	request: AuthenticatedRequest,
 	reply: FastifyReply,
-	apiId: string
+	apiKeyPlaintext: string
 ): Promise<boolean> {
-	const apiKey = await getApiKey(apiId);
+	// Hash the incoming API key
+	const keyHash = hashApiKey(apiKeyPlaintext);
+	
+	// Look up API key by hash
+	const apiKey = await getApiKeyByHash(keyHash);
 
 	if (!apiKey) {
-		console.error('API key not found:', apiId);
+		console.error('API key not found for hash:', keyHash.substring(0, 16) + '...');
 		return false;
 	}
 

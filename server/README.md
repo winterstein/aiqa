@@ -34,7 +34,7 @@ RESTful Endpoints:
  - /user (PostgreSQL)
  - /api-key (PostgreSQL)
  - /dataset (PostgreSQL) name, organisation id. Optional fields for description, tags, input-schema, output-schema, metrics.
- - /input Copies of spans for a given dataset. Have fields for organisation id, dataset id, (ElasticSearch)
+ - /example Examples for a given dataset. Have fields for organisation id, dataset id, and either spans array or inputs field (ElasticSearch)
  - /experiment (PostgreSQL) - summary results of running a dataset.
 	spans have an optional experiment id field, so we can surface details by experiment.
 
@@ -48,3 +48,8 @@ Write reusable code and avoid repeating code.
 Keep types to the minimum wanted (e.g. one type per database table/index). 
 Local utility types are fine for e.g. complex function input parameters. But avoid defining similar types, or types which are very simple.
 Except for local utility types, type definitions should be in a Types.ts file in the types directory.
+
+## Types / Schema files
+Types are mostly auto-generated from the TypeScript code.
+The Span type is maintained manually.
+scripts/generate-schemas.js is used to generate the schema files.

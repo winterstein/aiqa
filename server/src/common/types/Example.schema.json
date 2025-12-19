@@ -1,0 +1,188 @@
+{
+  "$ref": "#/definitions/Example",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "Example": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "traceId": {
+          "type": "string"
+        },
+        "dataset": {
+          "type": "string"
+        },
+        "organisation": {
+          "type": "string"
+        },
+        "spans": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "@timestamp": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "name": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "integer"
+              },
+              "parentSpanId": {
+                "type": "string"
+              },
+              "startTime": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                },
+                "minItems": 2,
+                "maxItems": 2,
+                "description": "HrTime tuple [seconds, nanoseconds]"
+              },
+              "endTime": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                },
+                "minItems": 2,
+                "maxItems": 2,
+                "description": "HrTime tuple [seconds, nanoseconds]"
+              },
+              "status": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "integer"
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                }
+              },
+              "attributes": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "links": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "context": {
+                      "type": "object"
+                    },
+                    "attributes": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              },
+              "events": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "time": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      },
+                      "minItems": 2,
+                      "maxItems": 2,
+                      "description": "HrTime tuple [seconds, nanoseconds]"
+                    },
+                    "attributes": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              },
+              "duration": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                },
+                "minItems": 2,
+                "maxItems": 2,
+                "description": "HrTime tuple [seconds, nanoseconds]"
+              },
+              "traceId": {
+                "type": "string"
+              },
+              "spanId": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "inputs": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "created": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "metrics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Metric"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "dataset",
+        "organisation",
+        "created",
+        "updated"
+      ],
+      "type": "object"
+    },
+    "Metric": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parameters": {
+          "type": "object"
+        },
+        "type": {
+          "enum": [
+            "javascript",
+            "llm"
+          ],
+          "type": "string"
+        },
+        "unit": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ],
+      "type": "object"
+    }
+  }
+}
+

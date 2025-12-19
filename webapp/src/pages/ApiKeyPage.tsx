@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { Container, Row, Col, Card, CardBody, CardHeader, ListGroup, ListGroupItem, Alert, Button } from 'reactstrap';
+import { Container, Row, Col, Card, CardBody, CardHeader, ListGroup, ListGroupItem, Alert, Button, Input, Modal, ModalHeader, ModalBody, ModalFooter, Label } from 'reactstrap';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { listApiKeys, createApiKey, deleteApiKey } from '../api';
+import { listApiKeys, createApiKey, deleteApiKey, API_BASE_URL } from '../api';
+import { useToast } from '../utils/toast';
 
 // Generate a secure random API key
 function generateApiKey(): string {
@@ -11,10 +12,25 @@ function generateApiKey(): string {
   return Array.from(randomBytes, byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * Hash an API key using SHA256.
+ */
+async function hashApiKey(key: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(key);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 const ApiKeyPage: React.FC = () => {
   const { organisationId } = useParams<{ organisationId: string }>();
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
   const [isCreating, setIsCreating] = useState(false);
+  const [newlyGeneratedKey, setNewlyGeneratedKey] = useState<string | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [newKeyName, setNewKeyName] = useState('');
   const isCreatingRef = useRef(false); // Synchronous flag to prevent race conditions
 
   const { data: apiKeys, isLoading, error } = useQuery({
@@ -23,22 +39,36 @@ const ApiKeyPage: React.FC = () => {
     enabled: !!organisationId,
   });
 
-  const handleCreateApiKey = useCallback(async (key: string) => {
+  const handleCreateApiKey = useCallback(async (key: string, name?: string) => {
     // Check ref first (synchronous) - this prevents race conditions
     if (isCreatingRef.current) return;
     isCreatingRef.current = true; // Set immediately (synchronous)
     setIsCreating(true);
+    
+    // Show the generated key to the user
+    setNewlyGeneratedKey(key);
+    
     try {
+      // Hash the key before sending to backend
+      const keyHash = await hashApiKey(key);
       await createApiKey({
         organisation: organisationId!,
-        key,
+        name: name || undefined,
+        key_hash: keyHash,
       });
       queryClient.invalidateQueries({ queryKey: ['apiKeys', organisationId] });
+      setShowCreateModal(false);
+      setNewKeyName('');
     } finally {
       setIsCreating(false);
       isCreatingRef.current = false; // Reset ref when done
     }
   }, [organisationId, queryClient]);
+
+  const handleCreateNewKey = useCallback(() => {
+    const newKey = generateApiKey();
+    handleCreateApiKey(newKey, newKeyName.trim() || undefined);
+  }, [newKeyName, handleCreateApiKey]);
 
   const deleteApiKeyMutation = useMutation({
     mutationFn: (id: string) => deleteApiKey(id),
@@ -62,7 +92,7 @@ const ApiKeyPage: React.FC = () => {
   useEffect(() => {
     if (!isLoading && apiKeys && Array.isArray(apiKeys) && apiKeys.length === 0 && !isCreatingRef.current) {
       const newKey = generateApiKey();
-      handleCreateApiKey(newKey);
+      handleCreateApiKey(newKey, undefined);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, apiKeys]);
@@ -123,10 +153,51 @@ const ApiKeyPage: React.FC = () => {
       <Row className="mt-4">
         <Col>
           <Card>
-            <CardHeader>
+            <CardHeader className="d-flex justify-content-between align-items-center">
               <h5>API Key Management</h5>
+              <Button
+                color="primary"
+                size="sm"
+                onClick={() => setShowCreateModal(true)}
+                disabled={isCreating}
+              >
+                Create New API Key
+              </Button>
             </CardHeader>
             <CardBody>
+              {newlyGeneratedKey && (
+                <Alert color="success" className="mb-3">
+                  <h5>Your new API key (save this now - you won't be able to see it again!):</h5>
+                  <div className="d-flex align-items-center gap-2 mb-2">
+                    <pre className="bg-light p-3 rounded flex-grow-1" style={{ fontSize: '0.9em', wordBreak: 'break-all', margin: 0 }}>
+                      {newlyGeneratedKey}
+                    </pre>
+                    <Button
+                      color="info"
+                      size="sm"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(newlyGeneratedKey);
+                          showToast('API key copied to clipboard!', 'success');
+                        } catch (err) {
+                          console.error('Failed to copy:', err);
+                          showToast('Failed to copy API key', 'error');
+                        }
+                      }}
+                      title="Copy to clipboard"
+                    >
+                      Copy
+                    </Button>
+                  </div>
+                  <Button
+                    color="secondary"
+                    size="sm"
+                    onClick={() => setNewlyGeneratedKey(null)}
+                  >
+                    I've saved it
+                  </Button>
+                </Alert>
+              )}
               {keys.length === 0 ? (
                 <Alert color="info">
                   Creating an API key for you...
@@ -138,7 +209,7 @@ const ApiKeyPage: React.FC = () => {
                       <div className="d-flex justify-content-between align-items-start">
                         <div className="flex-grow-1">
                           <div>
-                            <strong>API Key:</strong> {apiKey.id}
+                            <strong>{apiKey.name || 'API Key'}:</strong> {apiKey.id}
                           </div>
                           {apiKey.rate_limit_per_hour && (
                             <div>
@@ -171,6 +242,76 @@ const ApiKeyPage: React.FC = () => {
           </Card>
         </Col>
       </Row>
+
+      {(newlyGeneratedKey || keys.length > 0) && (
+        <Row className="mt-4">
+          <Col>
+            <Card>
+              <CardHeader>
+                <h5>Test Your API Key</h5>
+              </CardHeader>
+              <CardBody>
+                <p>Use this curl command to test your API key by fetching your datasets:</p>
+                <div className="d-flex align-items-start gap-2">
+                  <pre className="bg-light p-3 rounded flex-grow-1" style={{ fontSize: '0.9em', margin: 0, overflowX: 'auto' }}>
+                    {`curl -X GET "${API_BASE_URL}/dataset?organisation=${organisationId}" \\
+  -H "Authorization: ApiKey ${newlyGeneratedKey || 'YOUR_API_KEY'}" \\
+  -H "Content-Type: application/json"`}
+                  </pre>
+                  <Button
+                    color="info"
+                    size="sm"
+                    onClick={async () => {
+                      const curlCommand = `curl -X GET "${API_BASE_URL}/dataset?organisation=${organisationId}" \\
+  -H "Authorization: ApiKey ${newlyGeneratedKey || 'YOUR_API_KEY'}" \\
+  -H "Content-Type: application/json"`;
+                      try {
+                        await navigator.clipboard.writeText(curlCommand);
+                        showToast('Curl command copied to clipboard!', 'success');
+                      } catch (err) {
+                        console.error('Failed to copy:', err);
+                        showToast('Failed to copy curl command', 'error');
+                      }
+                    }}
+                    title="Copy curl command"
+                  >
+                    Copy
+                  </Button>
+                </div>
+                <p className="text-muted small mt-2">
+                  <strong>Note:</strong> Replace <code>YOUR_API_KEY</code> with your actual API key if you've already saved it.
+                  {newlyGeneratedKey && ' The command above uses your newly generated key.'}
+                </p>
+              </CardBody>
+            </Card>
+          </Col>
+        </Row>
+      )}
+
+      <Modal isOpen={showCreateModal} toggle={() => setShowCreateModal(false)}>
+        <ModalHeader toggle={() => setShowCreateModal(false)}>Create New API Key</ModalHeader>
+        <ModalBody>
+          <Label for="keyName">Name (optional)</Label>
+          <Input
+            type="text"
+            id="keyName"
+            value={newKeyName}
+            onChange={(e) => setNewKeyName(e.target.value)}
+            placeholder="e.g., Production API Key"
+          />
+          <p className="text-muted small mt-2">
+            A name helps you identify this API key later. The key itself will be shown after creation.
+          </p>
+        </ModalBody>
+        <ModalFooter>
+          <Button color="secondary" onClick={() => setShowCreateModal(false)}>
+            Cancel
+          </Button>
+          <Button color="primary" onClick={handleCreateNewKey} disabled={isCreating}>
+            {isCreating ? 'Creating...' : 'Create API Key'}
+          </Button>
+        </ModalFooter>
+      </Modal>
     </Container>
   );
 };

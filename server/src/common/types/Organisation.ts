@@ -1,4 +1,4 @@
-export interface Organisation {
+export default interface Organisation {
   id: string;
   name: string;
   rate_limit_per_hour?: number;

@@ -1,21 +1,22 @@
 /**
- * Elasticsearch operations for storing and querying OpenTelemetry spans.
+ * Elasticsearch operations for storing and querying OpenTelemetry spans and examples.
  * 
  * Lifecycle: Call initClient() before any operations, closeClient() during shutdown.
- * All functions throw if client not initialized. Uses two indices: 'traces' for spans, 'dataset_spans' for inputs.
+ * All functions throw if client not initialized. Uses two indices: 'traces' for spans, 'DATASET_EXAMPLES' for examples.
  */
 
 import { Client } from '@elastic/elasticsearch';
-import { Span } from '../common/types/index.js';
+import Span from '../common/types/Span.js';
 import SearchQuery from '../common/SearchQuery.js';
 import { loadSchema, jsonSchemaToEsMapping, getTypeDefinition } from '../common/utils/schema-loader.js';
 import { searchEntities as searchEntitiesEs } from './es_query.js';
+import Example from '../common/types/Example.js';
 
 let client: Client | null = null;
 const SPAN_INDEX = process.env.SPANS_INDEX || 'aiqa_spans';
 const SPAN_INDEX_ALIAS = process.env.SPANS_INDEX_ALIAS || 'aiqa_spans_alias';
-const DATASET_SPANS_INDEX = process.env.DATASET_SPANS_INDEX || 'aiqa_dataset_spans';
-const DATASET_SPANS_INDEX_ALIAS = process.env.DATASET_SPANS_INDEX_ALIAS || 'aiqa_dataset_spans_alias';
+const DATASET_EXAMPLES_INDEX = process.env.DATASET_EXAMPLES_INDEX || 'aiqa_dataset_examples';
+const DATASET_EXAMPLES_INDEX_ALIAS = process.env.DATASET_EXAMPLES_INDEX_ALIAS || 'aiqa_dataset_examples_alias';
 
 /**
  * Initialize Elasticsearch client. Must be called before any operations.
@@ -34,7 +35,7 @@ export function getClient(): Client {
   return client;
 }
 
-// Recursively generate Elasticsearch mappings from JSON Schema properties
+/**  Recursively generate Elasticsearch mappings from JSON Schema properties */
 function generateEsMappingsFromSchema(properties: Record<string, any>): Record<string, any> {
   const mappings: Record<string, any> = {};
   
@@ -101,6 +102,33 @@ function generateSpanMappings(): any {
   
   // Generate all mappings from schema (including nested objects)
   return generateEsMappingsFromSchema(spanDef.properties);
+}
+
+// Generate Elasticsearch mappings for Example schema
+// Examples have a spans field that should use flattened and time types like Span
+function generateExampleMappings(): any {
+  const exampleSchema = loadSchema('Example');
+  const exampleDef = getTypeDefinition(exampleSchema, 'Example');
+  
+  if (!exampleDef || !exampleDef.properties) {
+    throw new Error('Could not find Example properties in schema');
+  }
+  
+  // Generate base mappings from schema
+  const mappings = generateEsMappingsFromSchema(exampleDef.properties);
+  
+  // Reuse span mappings for the spans array field - spans are nested Span objects
+  if (mappings.spans && mappings.spans.type === 'nested') {
+    const spanMappings = generateSpanMappings();
+    mappings.spans.properties = spanMappings;
+  }
+  
+  // Special handling for inputs field - store as-is, not indexed
+  if (mappings.inputs) {
+    mappings.inputs = { type: 'object', enabled: false };
+  }
+  
+  return mappings;
 }
 
 // Generic function to create an Elasticsearch index
@@ -176,17 +204,31 @@ function transformSpanForEs(doc: any): any {
   return transformed;
 }
 
+// Transform example document for Elasticsearch (convert spans array with HrTime tuples)
+function transformExampleForEs(doc: any): any {
+  const transformed = { ...doc };
+  // Transform spans array if present
+  if (Array.isArray(transformed.spans)) {
+    transformed.spans = transformed.spans.map((span: any) => {
+      return transformSpanForEs(span);
+    });
+  }
+  return transformed;
+}
+
 // Generic bulk insert function
-async function bulkInsert<T>(indexName: string, documents: T[]): Promise<void> {
+async function bulkInsert<T>(indexName: string, documents: T[], transformFn?: (doc: any) => any): Promise<void> {
   if (!client) {
     throw new Error('Elasticsearch client not initialized.');
   }
 
   if (documents.length === 0) return;
 
+  const transform = transformFn || transformSpanForEs;
+
   const body = documents.flatMap(doc => {
-    const transformed = transformSpanForEs(doc);
-    const docId = (doc as any).spanId;
+    const transformed = transform(doc);
+    const docId = (doc as any).spanId || (doc as any).id;
     const indexAction = docId 
       ? { index: { _index: indexName, _id: docId } }
       : { index: { _index: indexName } };
@@ -239,28 +281,78 @@ async function searchEntities<T>(
   );
 }
 
+// Also ensure index aliases exist and point to the correct indices
+async function ensureAlias(index: string, alias: string): Promise<void> {
+  if (index === alias) return; // skip if alias is just the index name
+  if (!client) throw new Error('Elasticsearch client not initialized.');
+  
+  // Check if index exists first
+  const indexExists = await client.indices.exists({ index });
+  if (!indexExists) {
+    throw new Error(`Index ${index} does not exist. Create it before setting up aliases.`);
+  }
+  
+  // Check if alias already points to this index
+  try {
+    const aliasExists = await client.indices.existsAlias({ name: alias, index });
+    if (aliasExists) {
+      return; // Alias already correctly configured
+    }
+  } catch (error: any) {
+    // If existsAlias throws (e.g., alias doesn't exist), continue to set it up
+    // Only rethrow if it's not a 404 (not found) error
+    if (error.meta?.statusCode && error.meta.statusCode !== 404) {
+      throw error;
+    }
+  }
+  
+  // Get current alias assignments to remove them from other indices if needed
+  let indicesWithAlias: string[] = [];
+  try {
+    const aliasIndices = await client.indices.getAlias({ name: alias });
+    if (aliasIndices && typeof aliasIndices === 'object' && !Array.isArray(aliasIndices)) {
+      indicesWithAlias = Object.keys(aliasIndices).filter(i => i !== index);
+    }
+  } catch (error: any) {
+    // If alias doesn't exist (404), that's fine - we'll create it
+    // Only rethrow if it's not a 404 error
+    if (error.meta?.statusCode && error.meta.statusCode !== 404) {
+      throw error;
+    }
+  }
+  
+  // Build actions: remove alias from other indices, then add to target index
+  const actions: any[] = [];
+  if (indicesWithAlias.length > 0) {
+    actions.push(...indicesWithAlias.map(i => ({ remove: { index: i, alias } })));
+  }
+  actions.push({ add: { index, alias } });
+  
+  // Update aliases atomically
+  await client.indices.updateAliases({
+    body: { actions }
+  });
+}
+  
 /**
  * Create Elasticsearch indices with mappings. Safe to call multiple times (skips if index exists).
  * Call during application startup.
  */
-export async function createSchema(): Promise<void> {
-  const mappings = generateSpanMappings();
-  await createIndex(SPAN_INDEX, mappings);
-  await createIndex(DATASET_SPANS_INDEX, mappings);
+export async function createIndices(): Promise<void> {
+  const spanMappings = generateSpanMappings();
+  const exampleMappings = generateExampleMappings();
+  await createIndex(SPAN_INDEX, spanMappings);
+  await createIndex(DATASET_EXAMPLES_INDEX, exampleMappings);
+ 
+  await ensureAlias(SPAN_INDEX, SPAN_INDEX_ALIAS);
+  await ensureAlias(DATASET_EXAMPLES_INDEX, DATASET_EXAMPLES_INDEX_ALIAS);
 }
 
 /**
  * Bulk insert spans into 'traces' index. Spans should have organisation set.
  */
 export async function bulkInsertSpans(spans: Span[]): Promise<void> {
-  return bulkInsert<Span>(SPAN_INDEX, spans);
-}
-
-/**
- * Bulk insert input spans into 'dataset_spans' index. Inputs must have dataset and organisation set.
- */
-export async function bulkInsertInputs(inputs: Span[]): Promise<void> {
-  return bulkInsert<Span>(DATASET_SPANS_INDEX, inputs);
+  return bulkInsert<Span>(SPAN_INDEX_ALIAS, spans);
 }
 
 
@@ -275,7 +367,7 @@ export async function searchSpans(
   offset: number = 0
 ): Promise<{ hits: Span[]; total: number }> {
   return searchEntities<Span>(
-    SPAN_INDEX,
+    SPAN_INDEX_ALIAS,
     searchQuery,
     { organisation: organisationId },
     limit,
@@ -284,16 +376,23 @@ export async function searchSpans(
 }
 
 /**
- * Search input spans in 'dataset_spans' index. Filters by organisationId and/or datasetId if provided.
+ * Bulk insert examples into 'DATASET_EXAMPLES' index. Examples should have organisation and dataset set.
+ */
+export async function bulkInsertExamples(examples: Example[]): Promise<void> {
+  return bulkInsert<Example>(DATASET_EXAMPLES_INDEX_ALIAS, examples, transformExampleForEs);
+}
+
+/**
+ * Search examples in 'DATASET_EXAMPLES' index. Filters by organisationId and/or datasetId if provided.
  * @param searchQuery - Gmail-style search query or SearchQuery instance. Returns all if null.
  */
-export async function searchInputs(
+export async function searchExamples(
   searchQuery?: SearchQuery | string | null,
   organisationId?: string,
   datasetId?: string,
   limit: number = 100,
   offset: number = 0
-): Promise<{ hits: Span[]; total: number }> {
+): Promise<{ hits: Example[]; total: number }> {
   const filters: Record<string, string> = {};
   if (organisationId) {
     filters.organisation = organisationId;
@@ -301,8 +400,8 @@ export async function searchInputs(
   if (datasetId) {
     filters.dataset = datasetId;
   }
-  return searchEntities<Span>(
-    DATASET_SPANS_INDEX,
+  return searchEntities<Example>(
+    DATASET_EXAMPLES_INDEX_ALIAS,
     searchQuery,
     Object.keys(filters).length > 0 ? filters : undefined,
     limit,

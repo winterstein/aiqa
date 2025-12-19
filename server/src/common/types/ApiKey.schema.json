@@ -21,6 +21,9 @@
         "retention_period_days": {
           "type": "number"
         },
+        "key_hash": {
+          "type": "string"
+        },
         "updated": {
           "format": "date-time",
           "type": "string"
@@ -29,6 +32,7 @@
       "required": [
         "id",
         "organisation",
+        "key_hash",
         "created",
         "updated"
       ],

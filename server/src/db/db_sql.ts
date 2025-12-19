@@ -24,7 +24,7 @@ let pool: Pool | null = null;
 const TABLE_FIELDS: Record<string, Set<string>> = {
 	organisations: new Set(['name', 'rate_limit_per_hour', 'retention_period_days', 'members']),
 	users: new Set(['email', 'name', 'sub']),
-	api_keys: new Set(['organisation', 'rate_limit_per_hour', 'retention_period_days']),
+	api_keys: new Set(['organisation', 'name', 'key_hash', 'rate_limit_per_hour', 'retention_period_days']),
 	datasets: new Set(['organisation', 'name', 'description', 'tags', 'input_schema', 'output_schema', 'metrics']),
 	experiments: new Set(['dataset', 'organisation', 'summary_results']),
 	models: new Set(['organisation', 'name', 'api_key', 'version', 'description']),
@@ -118,7 +118,7 @@ export async function query<T extends QueryResultRow = any>(text: string, params
  * Create all database tables and indexes. Safe to call multiple times (uses IF NOT EXISTS).
  * Call during application startup.
  */
-export async function createSchema(): Promise<void> {
+export async function createTables(): Promise<void> {
 	// Load schemas
 	const organisationSchema = loadSchema('Organisation');
 	const userSchema = loadSchema('User');
@@ -163,34 +163,64 @@ export async function createSchema(): Promise<void> {
 	await query(`CREATE INDEX IF NOT EXISTS idx_experiments_dataset ON experiments(dataset)`);
 	await query(`CREATE INDEX IF NOT EXISTS idx_experiments_organisation ON experiments(organisation)`);
 
+	await applyMigrations();
+}
+
+async function applyMigrations(): Promise<void> {
 	// Add sub column to users table if it doesn't exist (migration)
 	await query(`
-    DO $$ 
-    BEGIN
-      IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_name = 'users' AND column_name = 'sub'
-      ) THEN
-        ALTER TABLE users ADD COLUMN sub VARCHAR(255);
-        CREATE INDEX IF NOT EXISTS idx_users_sub ON users(sub);
-      END IF;
-    END $$;
-  `);
-
-	// Allow NULL emails in users table (migration)
+		DO $$ 
+		BEGIN
+		  IF NOT EXISTS (
+			SELECT 1 FROM information_schema.columns 
+			WHERE table_name = 'users' AND column_name = 'sub'
+		  ) THEN
+			ALTER TABLE users ADD COLUMN sub VARCHAR(255);
+			CREATE INDEX IF NOT EXISTS idx_users_sub ON users(sub);
+		  END IF;
+		END $$;
+	  `);
+	
+		// Allow NULL emails in users table (migration)
+		await query(`
+		DO $$ 
+		BEGIN
+		  IF EXISTS (
+			SELECT 1 FROM information_schema.columns 
+			WHERE table_name = 'users' 
+			AND column_name = 'email' 
+			AND is_nullable = 'NO'
+		  ) THEN
+			ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
+		  END IF;
+		END $$;
+	  `);
+	
+	// Add key_hash column to api_keys table if it doesn't exist (migration)
 	await query(`
-    DO $$ 
-    BEGIN
-      IF EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_name = 'users' 
-        AND column_name = 'email' 
-        AND is_nullable = 'NO'
-      ) THEN
-        ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
-      END IF;
-    END $$;
-  `);
+		DO $$ 
+		BEGIN
+		  IF NOT EXISTS (
+			SELECT 1 FROM information_schema.columns 
+			WHERE table_name = 'api_keys' AND column_name = 'key_hash'
+		  ) THEN
+			ALTER TABLE api_keys ADD COLUMN key_hash VARCHAR(255);
+		  END IF;
+		END $$;
+	  `);
+	
+	// Add name column to api_keys table if it doesn't exist (migration)
+	await query(`
+		DO $$ 
+		BEGIN
+		  IF NOT EXISTS (
+			SELECT 1 FROM information_schema.columns 
+			WHERE table_name = 'api_keys' AND column_name = 'name'
+		  ) THEN
+			ALTER TABLE api_keys ADD COLUMN name VARCHAR(255);
+		  END IF;
+		END $$;
+	  `);
 }
 
 /**
@@ -401,6 +431,23 @@ export async function getApiKey(id: string): Promise<ApiKey | null> {
 }
 
 /**
+ * Get API key by its hash (for authentication).
+ */
+export async function getApiKeyByHash(keyHash: string): Promise<ApiKey | null> {
+	if (!pool) {
+		throw new Error('Database pool not initialized. Call initPool() first.');
+	}
+	const result = await pool.query(
+		'SELECT * FROM api_keys WHERE key_hash = $1 LIMIT 1',
+		[keyHash]
+	);
+	if (result.rows.length === 0) {
+		return null;
+	}
+	return transformApiKey(result.rows[0]);
+}
+
+/**
  * @param organisationId - Organisation ID (required)
  * @param searchQuery - Gmail-style search query or SearchQuery instance. Returns all if null.
  */
@@ -411,6 +458,7 @@ export async function listApiKeys(organisationId: string, searchQuery?: SearchQu
 export async function updateApiKey(id: string, updates: Partial<ApiKey>): Promise<ApiKey | null> {
 	const item: Record<string, any> = {};
 
+	if (updates.name !== undefined) item.name = updates.name;
 	if (updates.rate_limit_per_hour !== undefined) item.rate_limit_per_hour = updates.rate_limit_per_hour;
 	if (updates.retention_period_days !== undefined) item.retention_period_days = updates.retention_period_days;
 

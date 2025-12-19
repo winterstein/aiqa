@@ -1,4 +1,4 @@
-import { Span } from "./common/types";
+import Span from "./common/types/Span.js";
 
 export const API_BASE_URL = import.meta.env.VITE_AIQA_SERVER_URL || 'http://localhost:4001';
 
@@ -105,6 +105,20 @@ export async function createDataset(dataset: {
 	});
 }
 
+export async function updateDataset(id: string, updates: Partial<{
+	name?: string;
+	description?: string;
+	tags?: string[];
+	input_schema?: any;
+	output_schema?: any;
+	metrics?: any;
+}>) {
+	return fetchWithAuth(`/dataset/${id}`, {
+		method: 'PUT',
+		body: JSON.stringify(updates),
+	});
+}
+
 // Experiment endpoints
 export async function getExperiment(id: string) {
 	return fetchWithAuth(`/experiment/${id}`);
@@ -165,12 +179,19 @@ export async function searchSpans(args: {
 export async function createExampleFromSpan(args: {
 	organisationId:string,
 	datasetId:string,
-	span:Span
+	spans:Span[]
 }) {
 	const {organisationId, datasetId, span} = args;
-	let example = {...span};
-	example.organisation = organisationId;
-	example.dataset = datasetId;
+	// Create a proper Example with the span in the spans array
+	const example = {
+		id: crypto.randomUUID(),
+		traceId: span.traceId || span.clientTraceId,
+		dataset: datasetId,
+		organisation: organisationId,
+		spans:spans,
+		created: new Date(),
+		updated: new Date(),
+	};
 
 	return fetchWithAuth('/example', {
 		method: 'POST',
@@ -247,9 +268,21 @@ export async function listApiKeys(organisationId: string, query?: string) {
 	return fetchWithAuth(`/api-key?${params.toString()}`);
 }
 
+/**
+ * Hash an API key using SHA256.
+ */
+async function hashApiKey(key: string): Promise<string> {
+	const encoder = new TextEncoder();
+	const data = encoder.encode(key);
+	const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+	const hashArray = Array.from(new Uint8Array(hashBuffer));
+	return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 export async function createApiKey(apiKey: {
 	organisation: string;
-	key: string;
+	name?: string;
+	key_hash: string;
 	rate_limit_per_hour?: number;
 	retention_period_days?: number;
 }) {

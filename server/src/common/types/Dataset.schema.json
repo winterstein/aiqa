@@ -16,7 +16,12 @@
           "type": "string"
         },
         "input_schema": {},
-        "metrics": {},
+        "metrics": {
+          "items": {
+            "$ref": "#/definitions/Metric"
+          },
+          "type": "array"
+        },
         "name": {
           "type": "string"
         },
@@ -41,6 +46,35 @@
         "name",
         "created",
         "updated"
+      ],
+      "type": "object"
+    },
+    "Metric": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parameters": {
+          "type": "object"
+        },
+        "type": {
+          "enum": [
+            "javascript",
+            "llm"
+          ],
+          "type": "string"
+        },
+        "unit": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type"
       ],
       "type": "object"
     }

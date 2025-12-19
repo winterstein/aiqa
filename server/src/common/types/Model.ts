@@ -2,7 +2,7 @@
 /**
  * E.g. connection details for ChatGPT 4.1, Claude 3.5 Sonnet, etc.
  */
-export interface Model {
+export default interface Model {
 	id: string;
 	organisation: string;
 	name: string;

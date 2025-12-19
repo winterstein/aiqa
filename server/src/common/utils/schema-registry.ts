@@ -6,6 +6,7 @@ import ModelSchema from '../types/Model.schema.json';
 import DatasetSchema from '../types/Dataset.schema.json';
 import ExperimentSchema from '../types/Experiment.schema.json';
 import SpanSchema from '../types/Span.schema.json';
+import ExampleSchema from '../types/Example.schema.json';
 
 import type { JsonSchema } from './schema-loader.js';
 
@@ -17,6 +18,7 @@ const schemaRegistry: Record<string, JsonSchema> = {
   Dataset: DatasetSchema as JsonSchema,
   Experiment: ExperimentSchema as JsonSchema,
   Span: SpanSchema as JsonSchema,
+  Example: ExampleSchema as JsonSchema,
 };
 
 export function getSchema(typeName: string): JsonSchema {
@@ -26,6 +28,7 @@ export function getSchema(typeName: string): JsonSchema {
   }
   return schema;
 }
+
 
 
 
