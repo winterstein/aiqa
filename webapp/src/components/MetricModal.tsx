@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Modal, ModalHeader, ModalBody, ModalFooter, Form, Button } from 'reactstrap';
+import { Modal, ModalHeader, ModalBody, ModalFooter, Form, FormGroup, Button } from 'reactstrap';
 import { Metric } from '../common/types/Dataset';
 import PropInput from './PropInput';
 
@@ -18,7 +18,13 @@ const MetricModal: React.FC<MetricModalProps> = ({
   initialMetric,
   isEditing,
 }) => {
-  const metricRef = useRef<Partial<Metric>>({
+  const metricRef = useRef<{
+    name: string;
+    description: string;
+    unit: string;
+    type: Metric['type'];
+    parameters: Record<string, any>;
+  }>({
     name: '',
     description: '',
     unit: '',
@@ -34,7 +40,7 @@ const MetricModal: React.FC<MetricModalProps> = ({
           name: initialMetric.name || '',
           description: initialMetric.description || '',
           unit: initialMetric.unit || '',
-          type: initialMetric.type || 'javascript',
+          type: (initialMetric.type || 'javascript') as Metric['type'],
           parameters: initialMetric.parameters || {},
         };
       } else {
@@ -58,18 +64,13 @@ const MetricModal: React.FC<MetricModalProps> = ({
     onSave(metricRef.current as Metric);
   };
 
-  const handleTypeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const type = e.target.value as 'javascript' | 'llm' | 'number';
-    metricRef.current.type = type;
-    if (type === 'number') {
+  const handleRerender = () => {
+    // If type changed to 'number', clear parameters
+    if (metricRef.current.type === 'number') {
       metricRef.current.parameters = {};
     } else if (!metricRef.current.parameters) {
       metricRef.current.parameters = {};
     }
-    rerender((n) => n + 1);
-  };
-
-  const handleRerender = () => {
     rerender((n) => n + 1);
   };
 
@@ -82,60 +83,72 @@ const MetricModal: React.FC<MetricModalProps> = ({
       </ModalHeader>
       <ModalBody>
         <Form>
-          <PropInput
-            label="Name *"
-            item={metric}
-            prop="name"
-            type="text"
-            placeholder="e.g., latency"
-            onChange={handleRerender}
-          />
-          <PropInput
-            label="Type *"
-            item={metric}
-            prop="type"
-            type="select"
-            options={['javascript', 'llm', 'number']}
-            onChange={handleTypeChange}
-          />
-          {metric.type === 'llm' && (
+          <FormGroup>
             <PropInput
-              label="Prompt *"
-              item={metric.parameters || {}}
-              prop="prompt"
-              type="textarea"
-              rows={5}
-              placeholder="Enter the prompt for LLM evaluation"
+              label="Name *"
+              item={metric}
+              prop="name"
+              type="text"
+              placeholder="e.g., latency"
               onChange={handleRerender}
             />
+          </FormGroup>
+          <FormGroup>
+            <PropInput
+              label="Type *"
+              item={metric}
+              prop="type"
+              type="select"
+              options={['javascript', 'llm', 'number']}
+              onChange={handleRerender}
+            />
+          </FormGroup>
+          {metric.type === 'llm' && (
+            <FormGroup>
+              <PropInput
+                label="Prompt *"
+                item={metric.parameters || {}}
+                prop="prompt"
+                type="textarea"
+                rows={5}
+                placeholder="Enter the prompt for LLM evaluation"
+                onChange={handleRerender}
+              />
+            </FormGroup>
           )}
           {metric.type === 'javascript' && (
+            <FormGroup>
+              <PropInput
+                label="Code *"
+                item={metric.parameters || {}}
+                prop="code"
+                type="textarea"
+                rows={5}
+                placeholder="Enter JavaScript code for evaluation"
+                onChange={handleRerender}
+              />
+            </FormGroup>
+          )}
+          <FormGroup>
             <PropInput
-              label="Code *"
-              item={metric.parameters || {}}
-              prop="code"
-              type="textarea"
-              rows={5}
-              placeholder="Enter JavaScript code for evaluation"
+              label="Unit"
+              item={metric}
+              prop="unit"
+              type="text"
+              placeholder="e.g., ms, USD, tokens"
               onChange={handleRerender}
             />
-          )}
-          <PropInput
-            label="Unit"
-            item={metric}
-            prop="unit"
-            type="text"
-            placeholder="e.g., ms, USD, tokens"
-            onChange={handleRerender}
-          />
-          <PropInput
-            label="Description"
-            item={metric}
-            prop="description"
-            type="text"
-            placeholder="Optional description"
-            onChange={handleRerender}
-          />
+          </FormGroup>
+          <FormGroup>
+            <PropInput
+              label="Description"
+              item={metric}
+              prop="description"
+              type="text"
+              placeholder="Optional description"
+              onChange={handleRerender}
+            />
+          </FormGroup>
         </Form>
       </ModalBody>
       <ModalFooter>
