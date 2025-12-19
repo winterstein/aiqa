@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Modal, ModalHeader, ModalBody, ModalFooter, Form, FormGroup, Button } from 'reactstrap';
 import { Metric } from '../common/types/Dataset';
 import PropInput from './PropInput';
+import {useRerender} from 'rerenderer'
 
 interface MetricModalProps {
   isOpen: boolean;
@@ -18,31 +19,14 @@ const MetricModal: React.FC<MetricModalProps> = ({
   initialMetric,
   isEditing,
 }) => {
-  const metricRef = useRef<{
-    name: string;
-    description: string;
-    unit: string;
-    type: Metric['type'];
-    parameters: Record<string, any>;
-  }>({
-    name: '',
-    description: '',
-    unit: '',
-    type: 'javascript',
-    parameters: {},
-  });
-  const [, rerender] = useState(0);
+	
+  const metricRef = useRef<Partial<Metric>>({});
+  const {rerender} = useRerender();
 
   useEffect(() => {
     if (isOpen) {
       if (initialMetric) {
-        metricRef.current = {
-          name: initialMetric.name || '',
-          description: initialMetric.description || '',
-          unit: initialMetric.unit || '',
-          type: (initialMetric.type || 'javascript') as Metric['type'],
-          parameters: initialMetric.parameters || {},
-        };
+        metricRef.current = {...initialMetric};
       } else {
         metricRef.current = {
           name: '',
@@ -52,7 +36,7 @@ const MetricModal: React.FC<MetricModalProps> = ({
           parameters: {},
         };
       }
-      rerender((n) => n + 1);
+      rerender();
     }
   }, [isOpen, initialMetric]);
 
@@ -64,15 +48,6 @@ const MetricModal: React.FC<MetricModalProps> = ({
     onSave(metricRef.current as Metric);
   };
 
-  const handleRerender = () => {
-    // If type changed to 'number', clear parameters
-    if (metricRef.current.type === 'number') {
-      metricRef.current.parameters = {};
-    } else if (!metricRef.current.parameters) {
-      metricRef.current.parameters = {};
-    }
-    rerender((n) => n + 1);
-  };
 
   const metric = metricRef.current;
 
@@ -90,17 +65,18 @@ const MetricModal: React.FC<MetricModalProps> = ({
               prop="name"
               type="text"
               placeholder="e.g., latency"
-              onChange={handleRerender}
+              onChange={rerender}
             />
           </FormGroup>
           <FormGroup>
             <PropInput
-              label="Type *"
+              label="Type"
+			  required
               item={metric}
               prop="type"
               type="select"
               options={['javascript', 'llm', 'number']}
-              onChange={handleRerender}
+              onChange={rerender}
             />
           </FormGroup>
           {metric.type === 'llm' && (
@@ -112,7 +88,7 @@ const MetricModal: React.FC<MetricModalProps> = ({
                 type="textarea"
                 rows={5}
                 placeholder="Enter the prompt for LLM evaluation"
-                onChange={handleRerender}
+                onChange={rerender}
               />
             </FormGroup>
           )}
@@ -125,7 +101,7 @@ const MetricModal: React.FC<MetricModalProps> = ({
                 type="textarea"
                 rows={5}
                 placeholder="Enter JavaScript code for evaluation"
-                onChange={handleRerender}
+                onChange={rerender}
               />
             </FormGroup>
           )}
@@ -136,7 +112,7 @@ const MetricModal: React.FC<MetricModalProps> = ({
               prop="unit"
               type="text"
               placeholder="e.g., ms, USD, tokens"
-              onChange={handleRerender}
+              onChange={rerender}
             />
           </FormGroup>
           <FormGroup>
@@ -146,7 +122,7 @@ const MetricModal: React.FC<MetricModalProps> = ({
               prop="description"
               type="text"
               placeholder="Optional description"
-              onChange={handleRerender}
+              onChange={rerender}
             />
           </FormGroup>
         </Form>

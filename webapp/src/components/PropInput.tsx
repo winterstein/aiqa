@@ -23,9 +23,11 @@ type PropInputProps = {
 	/** for select multiple, treat value as string[] */
 	list?: boolean,
 	readOnly?: boolean,
+	/** Only affects display */
+	required?: boolean,
 }
 
-export default function PropInput({ label, item, prop, type, help, className, onChange, placeholder, multiple, list, readOnly, ...rest }
+export default function PropInput({ label, item, prop, type, help, className, onChange, placeholder, multiple, list, readOnly, required, ...rest }
 	: PropInputProps) 
 {
 	// console.log("PropInput render", { prop, type, item });
@@ -102,7 +104,7 @@ export default function PropInput({ label, item, prop, type, help, className, on
 		_Input = Input;
 	}
 	return (<div className={className}>
-		<Label>{label} {help && <HelpText label={prop}>{help}</HelpText>}</Label>		
+		<Label>{label} {required && <span>*</span>} {help && <HelpText label={prop}>{help}</HelpText>}</Label>		
 		<_Input value={displayValue} onChange={_onChange} type={type} {...rest} placeholder={placeholder} 
 			multiple={multiple} list={list} 
 			checked={type==="checkbox" ? localValue : undefined}
