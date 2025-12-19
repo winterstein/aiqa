@@ -3,7 +3,7 @@ export interface Metric {
   name: string;
   description?: string;
   unit?: string;
-  type: 'javascript' | 'llm'
+  type: 'javascript' | 'llm' | 'number'
   parameters?: Record<string, any>;
 }
 

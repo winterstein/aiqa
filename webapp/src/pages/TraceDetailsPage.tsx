@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { Container, Row, Col, Card, CardBody, CardHeader, Badge, Button } from 'reactstrap';
 import { useQuery } from '@tanstack/react-query';
 import { ColumnDef } from '@tanstack/react-table';
-import { createExampleFromSpan, listDatasets, searchSpans } from '../api';
+import { createExampleFromSpans, listDatasets, searchSpans } from '../api';
 import { Span } from '../common/types';
 import TableUsingAPI, { PageableData } from '../components/TableUsingAPI';
 import { getSpanId, getStartTime, getEndTime, getDurationMs } from '../utils/span-utils';
@@ -12,6 +12,15 @@ import JsonObjectViewer from '../components/JsonObjectViewer';
 interface SpanTree {
 	span: Span;
 	children: SpanTree[];
+}
+
+function collectSpansFromTree(spanTree: SpanTree): Span[] {
+	const spans: Span[] = [];
+	spans.push(spanTree.span);
+	spanTree.children.forEach(child => {
+		spans.push(...collectSpansFromTree(child));
+	});
+	return spans;
 }
 
 function organiseSpansIntoTree(spans: Span[], parent: Span | null): SpanTree | null {
@@ -61,15 +70,18 @@ const TraceDetailsPage: React.FC = () => {
 	 enabled: !!organisationId
   });
 
-  const addToDataSet = async (span: Span) => {
-	console.log('addToDataSet', span);
+  /** spans must be from the same trace */
+  const addToDataSet = async (spanTree: SpanTree) => {
+	console.log('addToDataSet', spanTree);
+	// recursively collect all spans from the tree
+	const spans = collectSpansFromTree(spanTree);
 	if (!datasets?.length) {
 		console.warn("No datasets?!", datasets, isLoadingDataSets);
 		return;
 	}
 	const dataset = datasets[0]; // HACK
 	// post to dataset examples
-	const ok = await createExampleFromSpan({organisationId, datasetId:dataset.id, span});
+	const ok = await createExampleFromSpans({organisationId, datasetId:dataset.id, spans});
 	console.log(ok);
 };
 
@@ -95,14 +107,13 @@ const TraceDetailsPage: React.FC = () => {
   );
 };
 
-function SpanTreeViewer({ spanTree, addToDataSet }: { spanTree: SpanTree }) {
+function SpanTreeViewer({ spanTree, addToDataSet }: { spanTree: SpanTree, addToDataSet: (spanTree: SpanTree) => Promise<void> }) {
 	let span = spanTree.span;
 	let children = spanTree.children;
-
 	return (
 		<div>
 			{span.name} <Timestamp timestamp={getStartTime(span)} /> Duration: {getDurationMs(span)}
-			<Button onClick={() => addToDataSet(span)}>Add to DataSet</Button>
+			<Button onClick={() => addToDataSet(spanTree)}>Add to DataSet</Button>
 			<pre>{JSON.stringify(span, null, 2)}</pre>
 			{children?.map(kid => <SpanTreeViewer key={kid.span.id} spanTree={kid} addToDataSet={addToDataSet} />)}			
 		</div>

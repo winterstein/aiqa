@@ -99,18 +99,8 @@ function PythonCodeSetupPane({ apiKey }: { apiKey?: ApiKey }) {
 pip install aiqa-client
       </pre>
 	  <p>In .env or otherwise, set the API key and server URL:</p>
-	  {apiKey ? (
-	    <p><code>AIQA_API_KEY=your-saved-api-key<br/>
-AIQA_SERVER_URL={API_BASE_URL}</code></p>
-	  ) : (
 	    <p><code>AIQA_API_KEY=your-api-key<br/>
 AIQA_SERVER_URL={API_BASE_URL}</code></p>
-	  )}
-	  {apiKey && (
-	    <p className="text-muted small mt-2">
-	      <strong>Note:</strong> Use the API key you saved when creating it. The key is only shown once during creation.
-	    </p>
-	  )}
       <h5>Trace your functions</h5>
       <p>
         Use the <code>@WithTracing</code> or <code>@WithTracingAsync</code> decorators from the client. For example:
@@ -137,18 +127,8 @@ function JavaScriptCodeSetupPane({ apiKey }: { apiKey?: ApiKey }) {
  <h5>Install the client-js library</h5>
 <p><code>npm install @aiqa/client-js</code></p>
 <p>In .env or otherwise, set the API key and server URL:</p>
-{apiKey ? (
-  <p><code>AIQA_API_KEY=your-saved-api-key<br/>
-AIQA_SERVER_URL={API_BASE_URL}</code></p>
-) : (
   <p><code>AIQA_API_KEY=your-api-key<br/>
 AIQA_SERVER_URL={API_BASE_URL}</code></p>
-)}
-{apiKey && (
-  <p className="text-muted small mt-2">
-    <strong>Note:</strong> Use the API key you saved when creating it. The key is only shown once during creation.
-  </p>
-)}
 <h5>Wrap the functions you want to trace using the <code>withTracing</code> or <code>withTracingAsync</code> decorators</h5>
 <pre><code>{`import { withTracing, withTracingAsync } from '@aiqa/client-js';
 
@@ -167,18 +147,8 @@ function GolangCodeSetupPane({ apiKey }: { apiKey?: ApiKey }) {
       <h5>Install the client-go library</h5>
       <p><code>go get github.com/aiqa/client-go</code></p>
       <p>In .env or otherwise, set the API key and server URL:</p>
-      {apiKey ? (
-        <p><code>AIQA_API_KEY=your-saved-api-key<br/>
-AIQA_SERVER_URL={API_BASE_URL}</code></p>
-      ) : (
         <p><code>AIQA_API_KEY=your-api-key<br/>
 AIQA_SERVER_URL={API_BASE_URL}</code></p>
-      )}
-      {apiKey && (
-        <p className="text-muted small mt-2">
-          <strong>Note:</strong> Use the API key you saved when creating it. The key is only shown once during creation.
-        </p>
-      )}
       <h5>Initialize tracing and wrap functions with <code>WithTracing</code></h5>
       <pre><code>{`import (
     "context"
@@ -216,17 +186,41 @@ function APICodeSetupPane({ apiKey }: { apiKey?: ApiKey }) {
   return (
     <div>
       <h5>API Integration Instructions</h5>
-      {apiKey ? (
-        <>
-          <p>API Key ID: <code>{apiKey.id}</code></p>
-          <p className="text-muted small mt-2">
-            <strong>Note:</strong> Use the API key you saved when creating it. The key is only shown once during creation.
-            Include it in the Authorization header as: <code>ApiKey &lt;your-saved-api-key&gt;</code>
-          </p>
-        </>
-      ) : (
-        <p>Your API key: <code>your-api-key</code></p>
-      )}
+	  <p>We recommend using a client library if possible.</p>
+      <p>
+        To add a span via the API, you can use <code>curl</code> to send a POST request to your AIQA server.
+        <br/>
+        Here is an example:
+      </p>
+      <pre>
+<code>{`curl -X POST \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: YOUR_API_KEY" \\
+  http://localhost:4001/span \\
+  -d '{
+    "organisation": "YOUR_ORGANISATION_ID",
+    "traceId": "example-trace-id",
+    "name": "operationName",
+    "startTime": 1719260281123,
+    "endTime": 1719260283123,
+    "attributes": {
+      "input": {"custom.key": "value"},
+      "output": {"custom.key": "value"}
+    }
+  }'
+`}</code>
+      </pre>
+      <ul>
+        <li><strong>organisation</strong>: Your organisation ID (see your environment variables).</li>
+        <li><strong>traceId</strong>: Use the same traceId to connect related spans.</li>
+        <li><strong>name</strong>: Name of the operation or function.</li>
+        <li><strong>startTime/endTime</strong>: Milliseconds since epoch (UTC). Use <code>Date.now()</code> or similar.</li>
+        <li><strong>attributes</strong>: (Optional) Custom attributes as key-value pairs.</li>
+      </ul>
+      <p>
+        The <code>X-API-Key</code> header must be set to your API key.<br/>
+        You can find your API key and organisation ID in your <code>.env</code> file.
+      </p>
     </div>
   );
 }

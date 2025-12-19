@@ -112,12 +112,16 @@ export async function searchEntities<T>(
     esQuery.bool.must.push({ match_all: {} });
   }
 
+  // Determine sort field based on index name
+  // Examples use 'created', Spans use '@timestamp'
+  const sortField = indexName.includes('examples') ? 'created' : '@timestamp';
+
   const result = await client.search<T>({
     index: indexName,
     query: esQuery,
     size: limit,
     from: offset,
-    sort: [{ '@timestamp': { order: 'desc' } }]
+    sort: [{ [sortField]: { order: 'desc' } }]
   });
 
   const hits = (result.hits.hits || []).map((hit: any) => hit._source!);

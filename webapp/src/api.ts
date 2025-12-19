@@ -176,16 +176,17 @@ export async function searchSpans(args: {
 	});
 }
 
-export async function createExampleFromSpan(args: {
+export async function createExampleFromSpans(args: {
 	organisationId:string,
 	datasetId:string,
 	spans:Span[]
 }) {
-	const {organisationId, datasetId, span} = args;
+	const {organisationId, datasetId, spans} = args;
 	// Create a proper Example with the span in the spans array
+	const traceId = spans[0].traceId;
 	const example = {
 		id: crypto.randomUUID(),
-		traceId: span.traceId || span.clientTraceId,
+		traceId: traceId,
 		dataset: datasetId,
 		organisation: organisationId,
 		spans:spans,

@@ -30,6 +30,7 @@ export interface TableUsingAPIProps<T> {
   pageSize?: number;
   enableInMemoryFiltering?: boolean;
   initialSorting?: SortingState;
+  onRowClick?: (row: T) => void;
 }
 
 function TableUsingAPI<T extends Record<string, any>>({
@@ -40,6 +41,7 @@ function TableUsingAPI<T extends Record<string, any>>({
   pageSize = 50,
   enableInMemoryFiltering = true,
   initialSorting = [],
+  onRowClick,
 }: TableUsingAPIProps<T>) {
   const [sorting, setSorting] = useState<SortingState>(initialSorting);
   const [globalFilter, setGlobalFilter] = useState('');
@@ -198,6 +200,7 @@ function TableUsingAPI<T extends Record<string, any>>({
                   columns={columns}
                   totalRows={totalRows}
                   flexRender={flexRender}
+                  onRowClick={onRowClick}
                 />
             </Table>
 
@@ -240,13 +243,17 @@ function TableHeader<T>({ headers, flexRender }: { headers: HeaderGroup<T>[], fl
 	);
 }
 
-function TableBody<T>({ paginatedRows, columns, totalRows, flexRender }: { paginatedRows: Row<T>[], columns: ColumnDef<T>[], totalRows: number, flexRender: <TProps extends object>(comp: any, props: TProps) => React.ReactNode }) {
+function TableBody<T>({ paginatedRows, columns, totalRows, flexRender, onRowClick }: { paginatedRows: Row<T>[], columns: ColumnDef<T>[], totalRows: number, flexRender: <TProps extends object>(comp: any, props: TProps) => React.ReactNode, onRowClick?: (row: T) => void }) {
 	return (
 		<tbody>
 			{paginatedRows.map((row) => {
 				const cells = row.getVisibleCells();
 				return (
-				  <tr key={row.id}>
+				  <tr 
+					key={row.id}
+					onClick={() => onRowClick?.(row.original)}
+					style={onRowClick ? { cursor: 'pointer' } : undefined}
+				  >
 					{cells.map((cell) => {
 					  const rendered = flexRender(cell.column.columnDef.cell, cell.getContext());
 					  return (

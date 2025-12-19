@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { Container, Row, Col } from 'reactstrap';
 import { ColumnDef } from '@tanstack/react-table';
 import { searchSpans } from '../api';
@@ -7,7 +7,7 @@ import { Span } from '../common/types';
 import TableUsingAPI, { PageableData } from '../components/TableUsingAPI';
 
 const getTraceId = (span: Span) => {
-  return span.client_trace_id || (span as any).traceId || (span as any).spanContext?.()?.traceId || '';
+  return (span as any).client_trace_id || (span as any).traceId || (span as any).spanContext?.()?.traceId || '';
 };
 
 const getStartTime = (span: Span) => {
@@ -47,6 +47,7 @@ const getDuration = (span: Span): number | null => {
 
 const TracesListPage: React.FC = () => {
   const { organisationId } = useParams<{ organisationId: string }>();
+  const navigate = useNavigate();
 
   const loadData = async (query: string): Promise<PageableData<Span>> => {
     const limit = 1000; // Fetch more traces for in-memory filtering
@@ -65,7 +66,7 @@ const TracesListPage: React.FC = () => {
       console.log('[TracesListPage] First span properties:', {
         name: (result.hits[0] as any).name,
         traceId: (result.hits[0] as any).traceId,
-        client_trace_id: result.hits[0].client_trace_id,
+        client_trace_id: (result.hits[0] as any).client_trace_id,
         startTime: (result.hits[0] as any).startTime,
         duration: (result.hits[0] as any).duration,
       });
@@ -123,21 +124,6 @@ const TracesListPage: React.FC = () => {
         },
         enableSorting: true,
       },
-      {
-        id: 'actions',
-        header: 'Actions',
-        cell: ({ row }) => {
-          const traceId = getTraceId(row.original);
-          return (
-            <Link
-              to={`/organisation/${organisationId}/traces/${traceId}`}
-              className="btn btn-sm btn-primary"
-            >
-              View
-            </Link>
-          );
-        },
-      },
     ],
     [organisationId]
   );
@@ -160,6 +146,12 @@ const TracesListPage: React.FC = () => {
             pageSize={50}
             enableInMemoryFiltering={true}
             initialSorting={[{ id: 'startTime', desc: true }]}
+            onRowClick={(span) => {
+              const traceId = getTraceId(span);
+              if (traceId) {
+                navigate(`/organisation/${organisationId}/traces/${traceId}`);
+              }
+            }}
           />
         </Col>
       </Row>

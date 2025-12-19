@@ -389,6 +389,23 @@ fastify.post('/example', { preHandler: authenticate }, async (request: Authentic
     }
   }
   
+  // Check for duplicates: same traceId + dataset combination
+  for (const example of examplesArray) {
+    if (example.traceId) {
+      // Build a search query for traceId AND dataset
+      let searchQuery = SearchQuery.setProp(null, 'traceId', example.traceId);
+      searchQuery = SearchQuery.setProp(searchQuery, 'dataset', example.dataset);
+      
+      const existing = await searchExamples(searchQuery, organisation, example.dataset, 1, 0);
+      if (existing.total > 0) {
+        reply.code(409).send({ 
+          error: `Example with traceId "${example.traceId}" and dataset "${example.dataset}" already exists` 
+        });
+        return;
+      }
+    }
+  }
+  
   // Add organisation and timestamps to each example
   const now = new Date();
   const examplesWithOrg = examplesArray.map(example => ({
