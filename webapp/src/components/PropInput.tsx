@@ -2,8 +2,12 @@
 
 import { Label, Input } from "reactstrap"
 import React, { useCallback, useState, useEffect } from "react";
-import { prettyString } from "@/app/utils";
+
 import HelpText from "./HelpText";
+
+function prettyString(str: string) {
+	return str.charAt(0).toUpperCase() + str.slice(1).replace(/_/g, " ");
+}
 
 type InputType = "text" | "textarea" | "select" | "checkbox" | "radio" | "number" | "date" | "list";
 
