@@ -3,20 +3,15 @@ OpenTelemetry tracing setup and utilities. Initializes tracer provider on import
 Provides WithTracing decorator to automatically trace function calls.
 """
 
-import os
 import json
 import logging
 import inspect
-from typing import Any, Callable, Optional, Dict
+from typing import Any, Callable, Optional, List
 from functools import wraps
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.sdk.trace.sampling import ALWAYS_ON
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.semconv.resource import ResourceAttributes
-from opentelemetry.trace import Status, StatusCode
-from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+from opentelemetry.trace import Status, StatusCode, SpanContext, TraceFlags
+from opentelemetry.propagate import inject, extract
 from .aiqa_exporter import AIQASpanExporter
 from .client import get_client, AIQA_TRACER_NAME
 
@@ -55,20 +50,74 @@ async def shutdown_tracing() -> None:
 
 # Export provider and exporter accessors for advanced usage
 
-__all__ = ["get_provider", "get_exporter", "flush_tracing", "shutdown_tracing", "WithTracing", "set_span_attribute", "set_span_name", "get_active_span"]
+__all__ = [
+    "get_provider", "get_exporter", "flush_tracing", "shutdown_tracing", "WithTracing",
+    "set_span_attribute", "set_span_name", "get_active_span",
+    "get_trace_id", "get_span_id", "create_span_from_trace_id", "inject_trace_context", "extract_trace_context",
+    "set_conversation_id"
+]
 
 
 class TracingOptions:
-    """Options for WithTracing decorator"""
+    """
+    Options for WithTracing decorator.
+    
+    This class is used to configure how function calls are traced and what data
+    is recorded in span attributes. All fields are optional.
+    """
 
     def __init__(
         self,
         name: Optional[str] = None,
-        ignore_input: Optional[Any] = None,
-        ignore_output: Optional[Any] = None,
+        ignore_input: Optional[List[str]] = None,
+        ignore_output: Optional[List[str]] = None,
         filter_input: Optional[Callable[[Any], Any]] = None,
         filter_output: Optional[Callable[[Any], Any]] = None,
     ):
+        """
+        Initialize TracingOptions.
+        
+        Args:
+            name: Custom name for the span. If not provided, the function name
+                will be used. Useful for renaming spans or providing more
+                descriptive names.
+            
+            ignore_input: Iterable of keys (e.g., list, set) to exclude from
+                input data when recording span attributes. Only applies when
+                input is a dictionary. For example, use `["password", "api_key"]`
+                to exclude sensitive fields from being traced.
+            
+            ignore_output: Iterable of keys (e.g., list, set) to exclude from
+                output data when recording span attributes. Only applies when
+                output is a dictionary. Useful for excluding large or sensitive
+                fields from traces.
+            
+            filter_input: Callable function that receives the prepared input data
+                and returns a filtered/transformed version to be recorded in the
+                span. The function should accept one argument (the input data)
+                and return the transformed data. This is applied before
+                ignore_input filtering.
+            
+            filter_output: Callable function that receives the output data and
+                returns a filtered/transformed version to be recorded in the span.
+                The function should accept one argument (the output data) and
+                return the transformed data. This is applied before
+                ignore_output filtering.
+        
+        Example:
+            # Exclude sensitive fields from input
+            @WithTracing(ignore_input=["password", "secret_key"])
+            def authenticate(username, password):
+                return {"token": "..."}
+            
+            # Custom span name and filter output
+            @WithTracing(
+                name="data_processing",
+                filter_output=lambda x: {"count": len(x)} if isinstance(x, list) else x
+            )
+            def process_data(items):
+                return items
+        """
         self.name = name
         self.ignore_input = ignore_input
         self.ignore_output = ignore_output
@@ -124,7 +173,7 @@ def _prepare_and_filter_input(
     args: tuple,
     kwargs: dict,
     filter_input: Optional[Callable[[Any], Any]],
-    ignore_input: Optional[Any],
+    ignore_input: Optional[List[str]],
 ) -> Any:
     """Prepare and filter input for span attributes."""
     input_data = _prepare_input(args, kwargs)
@@ -140,7 +189,7 @@ def _prepare_and_filter_input(
 def _prepare_and_filter_output(
     result: Any,
     filter_output: Optional[Callable[[Any], Any]],
-    ignore_output: Optional[Any],
+    ignore_output: Optional[List[str]],
 ) -> Any:
     """Prepare and filter output for span attributes."""
     output_data = result
@@ -170,7 +219,7 @@ class TracedGenerator:
         span: trace.Span,
         fn_name: str,
         filter_output: Optional[Callable[[Any], Any]],
-        ignore_output: Optional[Any],
+        ignore_output: Optional[List[str]],
         context_token: Any,
     ):
         self._generator = generator
@@ -237,7 +286,7 @@ class TracedAsyncGenerator:
         span: trace.Span,
         fn_name: str,
         filter_output: Optional[Callable[[Any], Any]],
-        ignore_output: Optional[Any],
+        ignore_output: Optional[List[str]],
         context_token: Any,
     ):
         self._generator = generator
@@ -299,8 +348,8 @@ def WithTracing(
     func: Optional[Callable] = None,
     *,
     name: Optional[str] = None,
-    ignore_input: Optional[Any] = None,
-    ignore_output: Optional[Any] = None,
+    ignore_input: Optional[List[str]] = None,
+    ignore_output: Optional[List[str]] = None,
     filter_input: Optional[Callable[[Any], Any]] = None,
     filter_output: Optional[Callable[[Any], Any]] = None,
 ):
@@ -313,8 +362,12 @@ def WithTracing(
     Args:
         func: The function to trace (when used as @WithTracing)
         name: Optional custom name for the span (defaults to function name)
-        ignore_input: Fields to ignore in input (not yet implemented)
-        ignore_output: Fields to ignore in output (not yet implemented)
+        ignore_input: List of keys to exclude from input data when recording span attributes.
+            Only applies when input is a dictionary. For example, use ["password", "api_key"]
+            to exclude sensitive fields from being traced.
+        ignore_output: List of keys to exclude from output data when recording span attributes.
+            Only applies when output is a dictionary. Useful for excluding large or sensitive
+            fields from traces.
         filter_input: Function to filter/transform input before recording
         filter_output: Function to filter/transform output before recording
     
@@ -436,12 +489,12 @@ def WithTracing(
             
             try:
                 if not _setup_span(span, input_data):
-                    generator = await executor()
+                    generator = executor()
                     trace.context_api.detach(token)
                     span.end()
                     return generator
                 
-                generator = await executor()
+                generator = executor()
                 return TracedAsyncGenerator(generator, span, fn_name, filter_output, ignore_output, token)
             except Exception as exception:
                 trace.context_api.detach(token)
@@ -532,6 +585,29 @@ def get_active_span() -> Optional[trace.Span]:
     """Get the currently active span."""
     return trace.get_current_span()
 
+
+def set_conversation_id(conversation_id: str) -> bool:
+    """
+    Set the conversation.id attribute on the active span.
+    This allows you to group multiple traces together that are part of the same conversation.
+    
+    Args:
+        conversation_id: A unique identifier for the conversation (e.g., user session ID, chat ID, etc.)
+    
+    Returns:
+        True if conversation.id was set, False if no active span found
+    
+    Example:
+        from aiqa import WithTracing, set_conversation_id
+        
+        @WithTracing
+        def handle_user_request(user_id: str, request: dict):
+            # Set conversation ID to group all traces for this user session
+            set_conversation_id(f"user_{user_id}_session_{request.get('session_id')}")
+            # ... rest of function
+    """
+    return set_span_attribute("conversation.id", conversation_id)
+
 def get_provider() -> Optional[TracerProvider]:
     """Get the tracer provider for advanced usage."""
     client = get_client()
@@ -541,4 +617,159 @@ def get_exporter() -> Optional[AIQASpanExporter]:
     """Get the exporter for advanced usage."""
     client = get_client()
     return client.get("exporter")
+
+
+def get_trace_id() -> Optional[str]:
+    """
+    Get the current trace ID as a hexadecimal string (32 characters).
+    
+    Returns:
+        The trace ID as a hex string, or None if no active span exists.
+    
+    Example:
+        trace_id = get_trace_id()
+        # Pass trace_id to another service/agent
+        # e.g., include in HTTP headers, message queue metadata, etc.
+    """
+    span = trace.get_current_span()
+    if span and span.get_span_context().is_valid:
+        return format(span.get_span_context().trace_id, "032x")
+    return None
+
+
+def get_span_id() -> Optional[str]:
+    """
+    Get the current span ID as a hexadecimal string (16 characters).
+    
+    Returns:
+        The span ID as a hex string, or None if no active span exists.
+    
+    Example:
+        span_id = get_span_id()
+        # Can be used to create child spans in other services
+    """
+    span = trace.get_current_span()
+    if span and span.get_span_context().is_valid:
+        return format(span.get_span_context().span_id, "016x")
+    return None
+
+
+def create_span_from_trace_id(
+    trace_id: str,
+    parent_span_id: Optional[str] = None,
+    span_name: str = "continued_span",
+) -> trace.Span:
+    """
+    Create a new span that continues from an existing trace ID.
+    This is useful for linking traces across different services or agents.
+    
+    Args:
+        trace_id: The trace ID as a hexadecimal string (32 characters)
+        parent_span_id: Optional parent span ID as a hexadecimal string (16 characters).
+            If provided, the new span will be a child of this span.
+        span_name: Name for the new span (default: "continued_span")
+    
+    Returns:
+        A new span that continues the trace. Use it in a context manager or call end() manually.
+    
+    Example:
+        # In service A: get trace ID
+        trace_id = get_trace_id()
+        span_id = get_span_id()
+        
+        # Send to service B (e.g., via HTTP, message queue, etc.)
+        # ...
+        
+        # In service B: continue the trace
+        with create_span_from_trace_id(trace_id, parent_span_id=span_id, span_name="service_b_operation"):
+            # Your code here
+            pass
+    """
+    try:
+        # Parse trace ID from hex string
+        trace_id_int = int(trace_id, 16)
+        
+        # Parse parent span ID if provided
+        parent_span_id_int = None
+        if parent_span_id:
+            parent_span_id_int = int(parent_span_id, 16)
+        
+        # Create a parent span context
+        parent_span_context = SpanContext(
+            trace_id=trace_id_int,
+            span_id=parent_span_id_int if parent_span_id_int else 0,
+            is_remote=True,
+            trace_flags=TraceFlags(0x01),  # SAMPLED flag
+        )
+        
+        # Create a context with this span context as the parent
+        from opentelemetry.trace import set_span_in_context
+        parent_context = set_span_in_context(trace.NonRecordingSpan(parent_span_context))
+        
+        # Start a new span in this context (it will be a child of the parent span)
+        tracer = trace.get_tracer(AIQA_TRACER_NAME)
+        span = tracer.start_span(span_name, context=parent_context)
+        
+        return span
+    except (ValueError, AttributeError) as e:
+        logger.error(f"Error creating span from trace_id: {e}", exc_info=True)
+        # Fallback: create a new span
+        tracer = trace.get_tracer(AIQA_TRACER_NAME)
+        return tracer.start_span(span_name)
+
+
+def inject_trace_context(carrier: dict) -> None:
+    """
+    Inject the current trace context into a carrier (e.g., HTTP headers).
+    This allows you to pass trace context to another service.
+    
+    Args:
+        carrier: Dictionary to inject trace context into (e.g., HTTP headers dict)
+    
+    Example:
+        import requests
+        
+        headers = {}
+        inject_trace_context(headers)
+        response = requests.get("http://other-service/api", headers=headers)
+    """
+    try:
+        inject(carrier)
+    except Exception as e:
+        logger.warning(f"Error injecting trace context: {e}", exc_info=True)
+
+
+def extract_trace_context(carrier: dict) -> Any:
+    """
+    Extract trace context from a carrier (e.g., HTTP headers).
+    Use this to continue a trace that was started in another service.
+    
+    Args:
+        carrier: Dictionary containing trace context (e.g., HTTP headers dict)
+    
+    Returns:
+        A context object that can be used with trace.use_span() or tracer.start_span()
+    
+    Example:
+        from opentelemetry.trace import use_span
+        
+        # Extract context from incoming request headers
+        ctx = extract_trace_context(request.headers)
+        
+        # Use the context to create a span
+        with use_span(ctx):
+            # Your code here
+            pass
+        
+        # Or create a span with the context
+        tracer = trace.get_tracer(AIQA_TRACER_NAME)
+        with tracer.start_as_current_span("operation", context=ctx):
+            # Your code here
+            pass
+    """
+    try:
+        return extract(carrier)
+    except Exception as e:
+        logger.warning(f"Error extracting trace context: {e}", exc_info=True)
+        return None
 

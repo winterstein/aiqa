@@ -5,8 +5,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { listExperiments, createExperiment, listDatasets } from '../api';
 import { Experiment } from '../common/types';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import MetricsDashboard from '../components/MetricsDashboard';
-
+import ExperimentsListMetricsDashboard from '../components/ExperimentListMetricsDashboard';
+import A from '../components/generic/A';
 
 const ExperimentsListPage: React.FC = () => {
   const { organisationId } = useParams<{ organisationId: string }>();
@@ -109,7 +109,7 @@ const ExperimentsListPage: React.FC = () => {
         </Col>
       </Row>
 
-      <MetricsDashboard experiments={filteredExperiments} />
+      <ExperimentsListMetricsDashboard experiments={filteredExperiments} />
 
       <Row className="mt-3">
         <Col>
@@ -123,84 +123,8 @@ const ExperimentsListPage: React.FC = () => {
       </Row>
 
       {/* Performance Charts */}
-      {filteredExperiments.length > 0 && hasAnyMetrics && (
-        <Row className="mt-4">
-          <Col>
-            <Card>
-              <CardHeader>
-                <h5>Performance Over Time</h5>
-              </CardHeader>
-              <CardBody>
-                <Row>
-                  {hasLatency && (
-                    <Col md={chartColWidth} className="mb-4">
-                      <h6 className="text-center">Latency</h6>
-                      <ResponsiveContainer width="100%" height={250}>
-                        <LineChart data={chartData}>
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis dataKey="name" />
-                          <YAxis />
-                          <Tooltip />
-                          <Legend />
-                          <Line 
-                            type="monotone" 
-                            dataKey="latency" 
-                            stroke="#8884d8" 
-                            name="Latency (ms)"
-                            strokeWidth={2}
-                          />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </Col>
-                  )}
-                  {hasCost && (
-                    <Col md={chartColWidth} className="mb-4">
-                      <h6 className="text-center">Cost</h6>
-                      <ResponsiveContainer width="100%" height={250}>
-                        <LineChart data={chartData}>
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis dataKey="name" />
-                          <YAxis />
-                          <Tooltip />
-                          <Legend />
-                          <Line 
-                            type="monotone" 
-                            dataKey="cost" 
-                            stroke="#82ca9d" 
-                            name="Cost (USD)"
-                            strokeWidth={2}
-                          />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </Col>
-                  )}
-                  {hasQuality && (
-                    <Col md={chartColWidth} className="mb-4">
-                      <h6 className="text-center">Quality Score</h6>
-                      <ResponsiveContainer width="100%" height={250}>
-                        <LineChart data={chartData}>
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis dataKey="name" />
-                          <YAxis />
-                          <Tooltip />
-                          <Legend />
-                          <Line 
-                            type="monotone" 
-                            dataKey="quality" 
-                            stroke="#ffc658" 
-                            name="Quality"
-                            strokeWidth={2}
-                          />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </Col>
-                  )}
-                </Row>
-              </CardBody>
-            </Card>
-          </Col>
-        </Row>
-      )}
+      {filteredExperiments.length > 0 && hasAnyMetrics && 
+	   <ExperimentsListMetricsDashboard experiments={filteredExperiments} />}
 
       {/* Experiments List */}
       <Row className="mt-3">
@@ -223,16 +147,14 @@ const ExperimentsListPage: React.FC = () => {
                     {filteredExperiments.map((experiment: Experiment) => (
                       <tr 
                         key={experiment.id}
-                        onClick={() => navigate(`/organisation/${organisationId}/dataset/${experiment.dataset}/experiment/${experiment.id}`)}
+                        onClick={() => navigate(`/organisation/${organisationId}/experiment/${experiment.id}`)}
                         style={{ cursor: 'pointer' }}
                       >
                         <td>
-                          <strong>{experiment.id.substring(0, 8)}...</strong>
+                          <A href={`/organisation/${organisationId}/experiment/${experiment.id}`}><strong>{experiment.id.substring(0, 8)}...</strong></A>
                         </td>
-                        <td>
-                          <Link to={`/organisation/${organisationId}/dataset/${experiment.dataset}`}>
+                        <td>                          
                             {experiment.dataset.substring(0, 8)}...
-                          </Link>
                         </td>
                         <td>{new Date(experiment.created).toLocaleString()}</td>
                         <td>{new Date(experiment.updated).toLocaleString()}</td>

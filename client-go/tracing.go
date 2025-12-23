@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -348,5 +349,106 @@ func SetSpanAttribute(ctx context.Context, attributeName string, attributeValue 
 // GetActiveSpan returns the active span from context
 func GetActiveSpan(ctx context.Context) trace.Span {
 	return trace.SpanFromContext(ctx)
+}
+
+// SetConversationId sets the conversation.id attribute on the active span.
+// This allows you to group multiple traces together that are part of the same conversation.
+//
+// conversationId: A unique identifier for the conversation (e.g., user session ID, chat ID, etc.)
+// Returns: True if conversation.id was set, False if no active span found
+func SetConversationId(ctx context.Context, conversationId string) bool {
+	return SetSpanAttribute(ctx, "conversation.id", conversationId)
+}
+
+// GetTraceId gets the current trace ID as a hexadecimal string (32 characters).
+// Returns: The trace ID as a hex string, or empty string if no active span exists.
+func GetTraceId(ctx context.Context) string {
+	span := trace.SpanFromContext(ctx)
+	if span.IsRecording() {
+		spanContext := span.SpanContext()
+		traceID := spanContext.TraceID()
+		if traceID.IsValid() {
+			return traceID.String()
+		}
+	}
+	return ""
+}
+
+// GetSpanId gets the current span ID as a hexadecimal string (16 characters).
+// Returns: The span ID as a hex string, or empty string if no active span exists.
+func GetSpanId(ctx context.Context) string {
+	span := trace.SpanFromContext(ctx)
+	if span.IsRecording() {
+		spanContext := span.SpanContext()
+		spanID := spanContext.SpanID()
+		if spanID.IsValid() {
+			return spanID.String()
+		}
+	}
+	return ""
+}
+
+// CreateSpanFromTraceId creates a new span that continues from an existing trace ID.
+// This is useful for linking traces across different services or agents.
+//
+// traceId: The trace ID as a hexadecimal string (32 characters)
+// parentSpanId: Optional parent span ID as a hexadecimal string (16 characters).
+//   If provided, the new span will be a child of this span.
+// spanName: Name for the new span (default: "continued_span")
+// Returns: A context with the new span and the span itself. Use it with defer span.End().
+func CreateSpanFromTraceId(ctx context.Context, traceId string, parentSpanId string, spanName string) (context.Context, trace.Span) {
+	if spanName == "" {
+		spanName = "continued_span"
+	}
+
+	// Parse trace ID
+	traceID, err := trace.TraceIDFromHex(traceId)
+	if err != nil {
+		// Fallback: create a new span
+		return tracer.Start(ctx, spanName)
+	}
+
+	// Parse parent span ID if provided
+	var spanID trace.SpanID
+	if parentSpanId != "" {
+		spanID, err = trace.SpanIDFromHex(parentSpanId)
+		if err != nil {
+			// If parent span ID is invalid, use zero span ID
+			spanID = trace.SpanID{}
+		}
+	}
+
+	// Create a span context
+	spanContext := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    traceID,
+		SpanID:     spanID,
+		TraceFlags: trace.FlagsSampled,
+		Remote:     true,
+	})
+
+	// Create a context with this span context as the parent
+	ctx = trace.ContextWithRemoteSpanContext(ctx, spanContext)
+
+	// Start a new span in this context (it will be a child of the parent span)
+	return tracer.Start(ctx, spanName)
+}
+
+// InjectTraceContext injects the current trace context into a carrier (e.g., HTTP headers).
+// This allows you to pass trace context to another service.
+//
+// carrier: Map to inject trace context into (e.g., HTTP headers map)
+func InjectTraceContext(ctx context.Context, carrier map[string]string) {
+	prop := otel.GetTextMapPropagator()
+	prop.Inject(ctx, propagation.MapCarrier(carrier))
+}
+
+// ExtractTraceContext extracts trace context from a carrier (e.g., HTTP headers).
+// Use this to continue a trace that was started in another service.
+//
+// carrier: Map containing trace context (e.g., HTTP headers map)
+// Returns: A context object that can be used with tracer.Start()
+func ExtractTraceContext(ctx context.Context, carrier map[string]string) context.Context {
+	prop := otel.GetTextMapPropagator()
+	return prop.Extract(ctx, propagation.MapCarrier(carrier))
 }
 

@@ -204,15 +204,15 @@ export class ExperimentRunner {
 	 * Run the engine on an example with the given parameters (looping over comparison parameters), and score the result.
 	 * Also calls scoreAndStore to store the result in the server.
 	 * @param example 
-	 * @param engine 
-	 * @param scorer 
+	 * @param callMyCode 
+	 * @param scoreThisOutput 
 	 * @returns one set of scores for each comparison parameter set. If no comparison parameters, returns an array of one.
 	 */
 	async runExample(example: Example,
-		engine: (input: any, parameters: Record<string, any>) => any | Promise<any>,
-		scorer: (output: any, example: Example, parameters: Record<string, any>) => Promise<Record<string, number>>): Promise<ScoreResult[]> {
+		callMyCode: (input: any, parameters: Record<string, any>) => any | Promise<any>,
+		scoreThisOutput: (output: any, example: Example, parameters: Record<string, any>) => Promise<Record<string, number>>): Promise<ScoreResult[]> {
 		// Ensure experiment exists
-		if (!this.experiment) {
+		if (!this.experiment) {inline
 			await this.createExperiment();
 		}
 		if (!this.experiment) {
@@ -240,15 +240,15 @@ export class ExperimentRunner {
 				}
 			}
 			const start = Date.now();
-			let pOutput = engine(input, parametersHere);
+			let pOutput = callMyCode(input, parametersHere);
 			const output = pOutput instanceof Promise ? await pOutput : pOutput;
 			console.log('Output:', output);
 			const end = Date.now();
 			const duration = end - start;
 
 			let scores = {}
-			if (scorer) {
-				scores = await scorer(output, example, parametersHere);
+			if (scoreThisOutput) {
+				scores = await scoreThisOutput(output, example, parametersHere);
 			}
 			scores['duration'] = duration;
 			// TODO this call as async and wait for all to complete before returning

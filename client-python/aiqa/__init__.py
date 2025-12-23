@@ -11,8 +11,15 @@ from .tracing import (
     get_active_span,
     get_provider,
     get_exporter,
+    get_trace_id,
+    get_span_id,
+    create_span_from_trace_id,
+    inject_trace_context,
+    extract_trace_context,
+    set_conversation_id,
 )
 from .client import get_client
+from .ExperimentRunner import ExperimentRunner
 
 __version__ = "0.2.2"
 
@@ -26,6 +33,13 @@ __all__ = [
     "get_provider",
     "get_exporter",
     "get_client",
+    "ExperimentRunner",
+    "get_trace_id",
+    "get_span_id",
+    "create_span_from_trace_id",
+    "inject_trace_context",
+    "extract_trace_context",
+    "set_conversation_id",
     "__version__",
 ]
 

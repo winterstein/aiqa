@@ -17,13 +17,20 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 export interface PageableData<T> {
   hits: T[];
-  offset: number;
-  limit: number;
+  offset?: number;
+  limit?: number;
   total?: number;
 }
 
 export interface TableUsingAPIProps<T> {
-  loadData: (query: string) => Promise<PageableData<T>>;
+	/**
+	 * The data to display (if not using loadData)
+	 */
+  data?: PageableData<T>;
+  /**
+   * The function to load data from the server (if not providing `data`)
+   */
+  loadData?: (query: string) => Promise<PageableData<T>>;
   columns: ColumnDef<T>[];
   searchPlaceholder?: string;
   searchDebounceMs?: number;
@@ -34,6 +41,7 @@ export interface TableUsingAPIProps<T> {
 }
 
 function TableUsingAPI<T extends Record<string, any>>({
+	data,
   loadData,
   columns,
   searchPlaceholder = 'Search...',
@@ -50,6 +58,10 @@ function TableUsingAPI<T extends Record<string, any>>({
   // Load data from server when debounced query changes
   // Use useQuery to cache
   const queryClient = useQueryClient();
+  // data provided? use it (via a constant function, so useQuery below is not conditional)
+  if (data) {
+	loadData = () => Promise.resolve(data);
+  }
   const { data: loadedData, isLoading, error: loadError } = useQuery({
     queryKey: ['table-data', serverQuery],
     queryFn: () => loadData(serverQuery),

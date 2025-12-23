@@ -5,7 +5,8 @@
 
 import * as dotenv from 'dotenv';
 import * as path from 'path';
-import { trace, context, SpanStatusCode } from '@opentelemetry/api';
+import { trace, context, SpanStatusCode, SpanContext, TraceFlags } from '@opentelemetry/api';
+import { propagation } from '@opentelemetry/api';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { Resource } from '@opentelemetry/resources';
@@ -206,4 +207,178 @@ export function setSpanAttribute(attributeName: string, attributeValue: any) {
 
 export function getActiveSpan() {
 	return trace.getActiveSpan();
+}
+
+/**
+ * Set the conversation.id attribute on the active span.
+ * This allows you to group multiple traces together that are part of the same conversation.
+ * 
+ * @param conversationId - A unique identifier for the conversation (e.g., user session ID, chat ID, etc.)
+ * @returns True if conversation.id was set, False if no active span found
+ * 
+ * @example
+ * ```typescript
+ * import { withTracing, setConversationId } from './src/tracing';
+ * 
+ * const tracedFn = withTracing(function handleUserRequest(userId: string, request: any) {
+ *   // Set conversation ID to group all traces for this user session
+ *   setConversationId(`user_${userId}_session_${request.sessionId}`);
+ *   // ... rest of function
+ * });
+ * ```
+ */
+export function setConversationId(conversationId: string): boolean {
+	return setSpanAttribute('conversation.id', conversationId);
+}
+
+/**
+ * Get the current trace ID as a hexadecimal string (32 characters).
+ * 
+ * @returns The trace ID as a hex string, or undefined if no active span exists.
+ * 
+ * @example
+ * ```typescript
+ * const traceId = getTraceId();
+ * // Pass traceId to another service/agent
+ * // e.g., include in HTTP headers, message queue metadata, etc.
+ * ```
+ */
+export function getTraceId(): string | undefined {
+	const span = trace.getActiveSpan();
+	if (span) {
+		const spanContext = span.spanContext();
+		if (spanContext.traceId && spanContext.traceId !== '00000000000000000000000000000000') {
+			return spanContext.traceId;
+		}
+	}
+	return undefined;
+}
+
+/**
+ * Get the current span ID as a hexadecimal string (16 characters).
+ * 
+ * @returns The span ID as a hex string, or undefined if no active span exists.
+ * 
+ * @example
+ * ```typescript
+ * const spanId = getSpanId();
+ * // Can be used to create child spans in other services
+ * ```
+ */
+export function getSpanId(): string | undefined {
+	const span = trace.getActiveSpan();
+	if (span) {
+		const spanContext = span.spanContext();
+		if (spanContext.spanId && spanContext.spanId !== '0000000000000000') {
+			return spanContext.spanId;
+		}
+	}
+	return undefined;
+}
+
+/**
+ * Create a new span that continues from an existing trace ID.
+ * This is useful for linking traces across different services or agents.
+ * 
+ * @param traceId - The trace ID as a hexadecimal string (32 characters)
+ * @param parentSpanId - Optional parent span ID as a hexadecimal string (16 characters).
+ *   If provided, the new span will be a child of this span.
+ * @param spanName - Name for the new span (default: "continued_span")
+ * @returns A new span that continues the trace. Use it in a context manager or call end() manually.
+ * 
+ * @example
+ * ```typescript
+ * // In service A: get trace ID
+ * const traceId = getTraceId();
+ * const spanId = getSpanId();
+ * 
+ * // Send to service B (e.g., via HTTP, message queue, etc.)
+ * // ...
+ * 
+ * // In service B: continue the trace
+ * const span = createSpanFromTraceId(traceId, parentSpanId, "service_b_operation");
+ * context.with(trace.setSpan(context.active(), span), () => {
+ *   // Your code here
+ *   span.end();
+ * });
+ * ```
+ */
+export function createSpanFromTraceId(
+	traceId: string,
+	parentSpanId?: string,
+	spanName: string = "continued_span"
+) {
+	try {
+		// Create a parent span context
+		const parentSpanContext: SpanContext = {
+			traceId: traceId,
+			spanId: parentSpanId || '0000000000000000',
+			traceFlags: TraceFlags.SAMPLED,
+			isRemote: true,
+		};
+		
+		// Create a context with this span context as the parent
+		const parentContext = trace.setSpanContext(context.active(), parentSpanContext);
+		
+		// Start a new span in this context (it will be a child of the parent span)
+		const span = tracer.startSpan(spanName, { root: false }, parentContext);
+		
+		return span;
+	} catch (error) {
+		console.error('Error creating span from trace_id:', error);
+		// Fallback: create a new span
+		return tracer.startSpan(spanName);
+	}
+}
+
+/**
+ * Inject the current trace context into a carrier (e.g., HTTP headers).
+ * This allows you to pass trace context to another service.
+ * 
+ * @param carrier - Object to inject trace context into (e.g., HTTP headers object)
+ * 
+ * @example
+ * ```typescript
+ * import axios from 'axios';
+ * 
+ * const headers: Record<string, string> = {};
+ * injectTraceContext(headers);
+ * const response = await axios.get("http://other-service/api", { headers });
+ * ```
+ */
+export function injectTraceContext(carrier: Record<string, string>): void {
+	try {
+		propagation.inject(context.active(), carrier);
+	} catch (error) {
+		console.warn('Error injecting trace context:', error);
+	}
+}
+
+/**
+ * Extract trace context from a carrier (e.g., HTTP headers).
+ * Use this to continue a trace that was started in another service.
+ * 
+ * @param carrier - Object containing trace context (e.g., HTTP headers object)
+ * @returns A context object that can be used with trace.setSpan() or tracer.startSpan()
+ * 
+ * @example
+ * ```typescript
+ * // Extract context from incoming request headers
+ * const ctx = extractTraceContext(request.headers);
+ * 
+ * // Use the context to create a span
+ * const span = tracer.startSpan("operation", {}, ctx);
+ * context.with(trace.setSpan(ctx, span), () => {
+ *   // Your code here
+ *   span.end();
+ * });
+ * ```
+ */
+export function extractTraceContext(carrier: Record<string, string>) {
+	try {
+		return propagation.extract(context.active(), carrier);
+	} catch (error) {
+		console.warn('Error extracting trace context:', error);
+		return context.active();
+	}
 }

@@ -107,6 +107,87 @@ def my_function():
     # ... rest of function
 ```
 
+### Grouping Traces by Conversation
+
+To group multiple traces together that are part of the same conversation or session:
+
+```python
+from aiqa import WithTracing, set_conversation_id
+
+@WithTracing
+def handle_user_request(user_id: str, session_id: str):
+    # Set conversation ID to group all traces for this user session
+    set_conversation_id(f"user_{user_id}_session_{session_id}")
+    # All spans created in this function and its children will have this conversation.id
+    # ... rest of function
+```
+
+The `conversation.id` attribute allows you to filter and group traces in the AIQA server by conversation, making it easier to analyze multi-step interactions or user sessions.
+
+### Trace ID Propagation Across Services/Agents
+
+To link traces across different services or agents, you can extract and propagate trace IDs:
+
+#### Getting Current Trace ID
+
+```python
+from aiqa import get_trace_id, get_span_id
+
+# Get the current trace ID and span ID
+trace_id = get_trace_id()  # Returns hex string (32 chars) or None
+span_id = get_span_id()    # Returns hex string (16 chars) or None
+
+# Pass these to another service (e.g., in HTTP headers, message queue, etc.)
+```
+
+#### Continuing a Trace in Another Service
+
+```python
+from aiqa import create_span_from_trace_id
+
+# Continue a trace from another service/agent
+# trace_id and parent_span_id come from the other service
+with create_span_from_trace_id(
+    trace_id="abc123...", 
+    parent_span_id="def456...",
+    span_name="service_b_operation"
+):
+    # Your code here - this span will be linked to the original trace
+    pass
+```
+
+#### Using OpenTelemetry Context Propagation (Recommended)
+
+For HTTP requests, use the built-in context propagation:
+
+```python
+from aiqa import inject_trace_context, extract_trace_context
+import requests
+from opentelemetry.trace import use_span
+
+# In the sending service:
+headers = {}
+inject_trace_context(headers)  # Adds trace context to headers
+response = requests.get("http://other-service/api", headers=headers)
+
+# In the receiving service:
+# Extract context from incoming request headers
+ctx = extract_trace_context(request.headers)
+
+# Use the context to create a span
+from opentelemetry.trace import use_span
+with use_span(ctx):
+    # Your code here
+    pass
+
+# Or create a span with the context
+from opentelemetry import trace
+tracer = trace.get_tracer("aiqa-tracer")
+with tracer.start_as_current_span("operation", context=ctx):
+    # Your code here
+    pass
+```
+
 ## Features
 
 - Automatic tracing of function calls (sync and async)
@@ -114,6 +195,7 @@ def my_function():
 - Automatic error tracking and exception recording
 - Thread-safe span buffering and auto-flushing
 - OpenTelemetry context propagation for nested spans
+- Trace ID propagation utilities for distributed tracing
 
 ## Example
 

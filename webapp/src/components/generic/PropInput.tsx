@@ -29,9 +29,11 @@ type PropInputProps = {
 	readOnly?: boolean,
 	/** Only affects display */
 	required?: boolean,
+	/** if true. display the label and input inline so e.g. it can be used in a heading */
+	inline?: boolean,
 }
 
-export default function PropInput({ label, item, prop, type, help, className, onChange, placeholder, multiple, list, readOnly, required, ...rest }
+export default function PropInput({ label, item, prop, type, help, className, onChange, placeholder, multiple, list, readOnly, required, inline, ...rest }
 	: PropInputProps) 
 {
 	// console.log("PropInput render", { prop, type, item });
@@ -107,8 +109,10 @@ export default function PropInput({ label, item, prop, type, help, className, on
 	} else {
 		_Input = Input;
 	}
-	return (<div className={className}>
-		<Label>{label} {required && <span>*</span>} {help && <HelpText label={prop}>{help}</HelpText>}</Label>		
+	const containerStyle = inline ? { display: 'flex', alignItems: 'center', gap: '0.5rem' } : undefined;
+	const labelStyle = inline ? { marginBottom: 0, marginRight: '0.5rem' } : undefined;
+	return (<div className={className} style={containerStyle}>
+		<Label style={labelStyle}>{label} {required && <span>*</span>} {help && <HelpText label={prop}>{help}</HelpText>}</Label>		
 		<_Input value={displayValue} onChange={_onChange} type={type} {...rest} placeholder={placeholder} 
 			multiple={multiple} list={list} 
 			checked={type==="checkbox" ? localValue : undefined}

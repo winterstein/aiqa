@@ -87,7 +87,7 @@ function processMetricData(metrics: Metric[], experiments: Experiment[], dataset
 /**
  * Show analysis of experiments
  */
-export default function MetricsDashboard({ experiments }: { experiments: Experiment[] }) {
+export default function ExperimentsListMetricsDashboard({ experiments }: { experiments: Experiment[] }) {
 	// Extract unique dataset IDs from experiments
 	const datasetIds = useMemo(() => {
 		const ids = new Set<string>();
