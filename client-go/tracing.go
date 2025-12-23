@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
+	"math"
 	"os"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,11 +27,46 @@ var (
 	tracerProvider *sdktrace.TracerProvider
 	tracer         trace.Tracer
 	exporter       *AIQAExporter
+	samplingRate   float64 = 1.0 // Default: sample all traces
 )
 
 const (
 	tracerName = "aiqa-tracer"
 )
+
+// traceIDSampler implements deterministic sampling based on trace-id
+type traceIDSampler struct {
+	rate float64
+}
+
+func (s *traceIDSampler) ShouldSample(params sdktrace.SamplingParameters) sdktrace.SamplingResult {
+	if s.rate <= 0 {
+		return sdktrace.SamplingResult{Decision: sdktrace.Drop}
+	}
+	if s.rate >= 1 {
+		return sdktrace.SamplingResult{Decision: sdktrace.RecordAndSample}
+	}
+	
+	// Use trace ID for deterministic sampling
+	traceID := params.TraceID
+	hash := fnv.New64a()
+	hash.Write(traceID[:])
+	hashValue := hash.Sum64()
+	
+	// Convert hash to a value in [0, 1)
+	// hashValue is already a uint64, so normalize it by dividing by max uint64 (2^64 - 1)
+	const maxUint64 = float64(^uint64(0))
+	sampleValue := float64(hashValue) / maxUint64
+	
+	if sampleValue < s.rate {
+		return sdktrace.SamplingResult{Decision: sdktrace.RecordAndSample}
+	}
+	return sdktrace.SamplingResult{Decision: sdktrace.Drop}
+}
+
+func (s *traceIDSampler) Description() string {
+	return fmt.Sprintf("TraceIDSampler{rate=%.4f}", s.rate)
+}
 
 // TracingOptions contains options for tracing functions
 type TracingOptions struct {
@@ -40,12 +78,32 @@ type TracingOptions struct {
 }
 
 // InitTracing initializes the OpenTelemetry tracer provider with AIQA exporter
-func InitTracing(serverURL, apiKey string) error {
+// samplingRate: value between 0 and 1, where 0 = tracing is off, 1 = trace all
+// If not provided, reads from AIQA_SAMPLING_RATE environment variable (default: 1.0)
+func InitTracing(serverURL, apiKey string, samplingRateArg ...float64) error {
 	if serverURL == "" {
 		serverURL = os.Getenv("AIQA_SERVER_URL")
 	}
 	if apiKey == "" {
 		apiKey = os.Getenv("AIQA_API_KEY")
+	}
+	
+	// Set sampling rate
+	if len(samplingRateArg) > 0 {
+		samplingRate = samplingRateArg[0]
+	} else {
+		if envRate := os.Getenv("AIQA_SAMPLING_RATE"); envRate != "" {
+			if rate, err := strconv.ParseFloat(envRate, 64); err == nil {
+				samplingRate = rate
+			}
+		}
+	}
+	
+	// Clamp sampling rate to [0, 1]
+	if samplingRate < 0 {
+		samplingRate = 0
+	} else if samplingRate > 1 {
+		samplingRate = 1
 	}
 	
 	exporter = NewAIQAExporter(serverURL, apiKey, 5)
@@ -63,9 +121,13 @@ func InitTracing(serverURL, apiKey string) error {
 	// Create a batch span processor with the exporter
 	bsp := sdktrace.NewBatchSpanProcessor(exporter)
 	
+	// Create custom sampler based on trace-id
+	sampler := &traceIDSampler{rate: samplingRate}
+	
 	tracerProvider = sdktrace.NewTracerProvider(
 		sdktrace.WithSpanProcessor(bsp),
 		sdktrace.WithResource(res),
+		sdktrace.WithSampler(sampler),
 	)
 	
 	otel.SetTracerProvider(tracerProvider)

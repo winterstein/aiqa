@@ -4,6 +4,7 @@ from functools import lru_cache
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.trace.sampling import TraceIdRatioBasedSampler
 
 from .aiqa_exporter import AIQASpanExporter
 
@@ -26,7 +27,18 @@ def _init_tracing():
 
     # If it's still the default proxy, install a real SDK provider
     if not isinstance(provider, TracerProvider):
-        provider = TracerProvider()
+        # Get sampling rate from environment (default: 1.0 = sample all)
+        sampling_rate = 1.0
+        if env_rate := os.getenv("AIQA_SAMPLING_RATE"):
+            try:
+                rate = float(env_rate)
+                sampling_rate = max(0.0, min(1.0, rate))  # Clamp to [0, 1]
+            except ValueError:
+                pass
+        
+        # Create sampler based on trace-id for deterministic sampling
+        sampler = TraceIdRatioBasedSampler(sampling_rate)
+        provider = TracerProvider(sampler=sampler)
         trace.set_tracer_provider(provider)
 
     # Idempotently add your processor

@@ -8,13 +8,22 @@ import * as path from 'path';
 import { trace, context, SpanStatusCode, SpanContext, TraceFlags } from '@opentelemetry/api';
 import { propagation } from '@opentelemetry/api';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
-import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
+import { BatchSpanProcessor, TraceIdRatioBasedSampler } from '@opentelemetry/sdk-trace-base';
 import { Resource } from '@opentelemetry/resources';
 import { ATTR_CODE_FUNCTION_NAME, SEMRESATTRS_SERVICE_NAME } from '@opentelemetry/semantic-conventions';
 import { AIQASpanExporter } from './aiqa-exporter';
 
 // Load environment variables from .env file in client-js directory
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
+
+// Get sampling rate from environment (default: 1.0 = sample all)
+let samplingRate = 1.0;
+if (process.env.AIQA_SAMPLING_RATE) {
+	const rate = parseFloat(process.env.AIQA_SAMPLING_RATE);
+	if (!isNaN(rate)) {
+		samplingRate = Math.max(0, Math.min(1, rate)); // Clamp to [0, 1]
+	}
+}
 
 // Initialize OpenTelemetry with Elasticsearch exporter
 const aiqaServerUrl = process.env.AIQA_SERVER_URL;
@@ -24,6 +33,7 @@ const provider = new NodeTracerProvider({
 	resource: new Resource({
 		[SEMRESATTRS_SERVICE_NAME]: 'example-service',
 	}),
+	sampler: new TraceIdRatioBasedSampler(samplingRate),
 });
 
 provider.addSpanProcessor(new BatchSpanProcessor(exporter));
