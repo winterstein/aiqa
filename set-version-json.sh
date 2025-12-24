@@ -44,7 +44,9 @@ echo `cat $VERSION_INFO_FILE`
 
 # Stage the modified version.json files if we're in a git repository
 if git rev-parse --git-dir > /dev/null 2>&1; then
+    echo "Staging version.json files..."
     git add version.json
     git add client-go/version.json client-python/version.json client-js/version.json
     git add server/.well-known/version.json webapp/.well-known/version.json 2>/dev/null || true
+    echo "Version files staged successfully"
 fi
