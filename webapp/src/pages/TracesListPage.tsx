@@ -124,6 +124,16 @@ const TracesListPage: React.FC = () => {
         },
         enableSorting: true,
       },
+      {
+        id: 'component',
+        header: 'Component',
+        cell: ({ row }) => {
+          const component = (row.original as any).attributes?.['gen_ai.component.id'] || 
+                           (row.original as any).attributes?.component || 
+                           null;
+          return <span>{component || 'N/A'}</span>;
+        },
+      },
     ],
     [organisationId]
   );

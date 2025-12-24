@@ -28,11 +28,12 @@ pip install -e .
 
 Now you can test imports:
 ```bash
-python -c "from aiqa import WithTracing; print('Import successful!')"
+python -c "from aiqa import WithTracing; print('Import successful')"
 ```
 
 Run the example:
 ```bash
+pip install -r requirements.examples.txt
 python example.py
 ```
 

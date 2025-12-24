@@ -178,16 +178,8 @@ const ApiKeyPage: React.FC = () => {
                       className="btn btn-info btn-sm"
                       showToast={showToast}
                       successMessage="API key copied to clipboard!"
-             
                     />
                   </div>
-                  <Button
-                    color="secondary"
-                    size="sm"
-                    onClick={() => setNewlyGeneratedKey(null)}
-                  >
-                    I've saved it
-                  </Button>
                 </Alert>
               )}
               {keys.length === 0 ? (

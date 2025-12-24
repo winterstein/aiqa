@@ -18,6 +18,9 @@ import ApiKeyPage from './ApiKeyPage';
 import CodeSetupPage from './CodeSetupPage';
 import ExperimentCodePage from './ExperimentCodePage';
 import MetricsPage from './MetricsPage';
+import ProfilePage from './ProfilePage';
+import AccountPage from './AccountPage';
+import AboutPage from './AboutPage';
 import Layout from './Layout';
 import { ToastProvider } from '../utils/toast';
 
@@ -194,6 +197,30 @@ const AppRoutes: React.FC = () => {
         element={
           <ProtectedRoute>
             <ExperimentDetailsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/organisation/:organisationId/account"
+        element={
+          <ProtectedRoute>
+            <AccountPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/profile"
+        element={
+          <ProtectedRoute>
+            <ProfilePage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/about"
+        element={
+          <ProtectedRoute>
+            <AboutPage />
           </ProtectedRoute>
         }
       />

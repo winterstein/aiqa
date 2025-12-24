@@ -25,20 +25,58 @@ if (process.env.AIQA_SAMPLING_RATE) {
 	}
 }
 
-// Initialize OpenTelemetry with Elasticsearch exporter
+// Component tag to add to all spans (can be set via AIQA_COMPONENT_TAG env var or programmatically)
+let componentTag: string = process.env.AIQA_COMPONENT_TAG || "";
+
+// Initialize OpenTelemetry with AIQA exporter
 const aiqaServerUrl = process.env.AIQA_SERVER_URL;
 const exporter = new AIQASpanExporter(aiqaServerUrl);
 
-const provider = new NodeTracerProvider({
-	resource: new Resource({
-		[SEMRESATTRS_SERVICE_NAME]: 'example-service',
-	}),
-	sampler: new TraceIdRatioBasedSampler(samplingRate),
-});
+// Check if a TracerProvider is already registered
+const existingProvider = trace.getTracerProvider();
 
-provider.addSpanProcessor(new BatchSpanProcessor(exporter));
+// Check if it's a real SDK provider (has addSpanProcessor method) or just the default NoOp provider
+const isRealProvider = existingProvider && typeof (existingProvider as any).addSpanProcessor === 'function';
 
-provider.register();
+let provider: NodeTracerProvider;
+
+if (!isRealProvider) {
+	// No real provider exists, create a new one
+	provider = new NodeTracerProvider({
+		resource: new Resource({
+			[SEMRESATTRS_SERVICE_NAME]: 'example-service',
+		}),
+		sampler: new TraceIdRatioBasedSampler(samplingRate),
+	});
+	
+	provider.addSpanProcessor(new BatchSpanProcessor(exporter));
+	provider.register();
+} else {
+	// Real provider already exists, just add our span processor to it
+	// Check if we've already added our processor to avoid duplicates
+	provider = existingProvider as NodeTracerProvider;
+	let processorAlreadyAdded = false;
+	
+	// Try to check if our exporter is already in the processor list
+	// Note: This is a best-effort check since we can't easily inspect internal processors
+	try {
+		const processors = (provider as any)._spanProcessors;
+		if (processors) {
+			for (const proc of processors) {
+				if (proc && proc._exporter === exporter) {
+					processorAlreadyAdded = true;
+					break;
+				}
+			}
+		}
+	} catch (e) {
+		// If we can't check, assume it's not added and proceed
+	}
+	
+	if (!processorAlreadyAdded) {
+		provider.addSpanProcessor(new BatchSpanProcessor(exporter));
+	}
+}
 
 // Getting a tracer with the same name ('example-tracer') simply returns a tracer instance;
 // it does NOT link spans automatically within the same trace.
@@ -56,16 +94,22 @@ const tracer = trace.getTracer('example-tracer');
  * 
  */
 export async function flushSpans(): Promise<void> {
-	await provider.forceFlush();
+	if (provider) {
+		await provider.forceFlush();
+	}
 	await exporter.flush();
 }
 
 /**
  * Shutdown the tracer provider and exporter. 
  * It is not necessary to call this function.
+ * Note: If using with an existing TracerProvider, this will shutdown the entire provider,
+ * which may affect other tracing systems. Use with caution.
  */
 export async function shutdownTracing(): Promise<void> {
-	await provider.shutdown();
+	if (provider) {
+		await provider.shutdown();
+	}
 	await exporter.shutdown();
 }
 
@@ -96,6 +140,12 @@ export function withTracingAsync(fn: Function, options: TracingOptions = {}) {
 	}
 	const tracedFn = async (...args: any[]) => {
 		const span = tracer.startSpan(fnName);
+		
+		// Set component tag if configured
+		if (componentTag) {
+			span.setAttribute('component', componentTag);
+		}
+		
 		// Trace inputs using input. attributes
 		let input = args;
 		if (args.length === 0) {
@@ -157,6 +207,12 @@ export function withTracing(fn: Function, options: TracingOptions = {}) {
 	}
 	const tracedFn = (...args: any[]) => {
 		const span = tracer.startSpan(fnName);
+		
+		// Set component tag if configured
+		if (componentTag) {
+			span.setAttribute('component', componentTag);
+		}
+		
 		// Trace inputs using input. attributes
 		let input = args;
 		if (args.length === 0) {
@@ -220,11 +276,12 @@ export function getActiveSpan() {
 }
 
 /**
- * Set the conversation.id attribute on the active span.
+ * Set the gen_ai.conversation.id attribute on the active span.
  * This allows you to group multiple traces together that are part of the same conversation.
+ * See https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-events/ for more details.
  * 
  * @param conversationId - A unique identifier for the conversation (e.g., user session ID, chat ID, etc.)
- * @returns True if conversation.id was set, False if no active span found
+ * @returns True if gen_ai.conversation.id was set, False if no active span found
  * 
  * @example
  * ```typescript
@@ -238,7 +295,29 @@ export function getActiveSpan() {
  * ```
  */
 export function setConversationId(conversationId: string): boolean {
-	return setSpanAttribute('conversation.id', conversationId);
+	return setSpanAttribute('gen_ai.conversation.id', conversationId);
+}
+
+/**
+ * Set the component tag that will be added to all spans created by AIQA.
+ * This can also be set via the AIQA_COMPONENT_TAG environment variable.
+ * The component tag allows you to identify which component/system generated the spans.
+ * 
+ * @param tag - A component identifier (e.g., "mynamespace.mysystem", "backend.api", etc.)
+ * 
+ * @example
+ * ```typescript
+ * import { setComponentTag } from './src/tracing';
+ * 
+ * // Set component tag programmatically
+ * setComponentTag("mynamespace.mysystem");
+ * 
+ * // Or set via environment variable:
+ * // export AIQA_COMPONENT_TAG="mynamespace.mysystem"
+ * ```
+ */
+export function setComponentTag(tag: string): void {
+	componentTag = tag;
 }
 
 /**
@@ -333,11 +412,20 @@ export function createSpanFromTraceId(
 		// Start a new span in this context (it will be a child of the parent span)
 		const span = tracer.startSpan(spanName, { root: false }, parentContext);
 		
+		// Set component tag if configured
+		if (componentTag) {
+			span.setAttribute('component', componentTag);
+		}
+		
 		return span;
 	} catch (error) {
 		console.error('Error creating span from trace_id:', error);
 		// Fallback: create a new span
-		return tracer.startSpan(spanName);
+		const span = tracer.startSpan(spanName);
+		if (componentTag) {
+			span.setAttribute('component', componentTag);
+		}
+		return span;
 	}
 }
 

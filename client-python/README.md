@@ -35,7 +35,15 @@ export AIQA_API_KEY="your-api-key"
 ### Basic Usage
 
 ```python
-from aiqa import WithTracing
+from dotenv import load_dotenv
+from aiqa import get_aiqa_client, WithTracing
+
+# Load environment variables from .env file (if using one)
+load_dotenv()
+
+# Initialize client (must be called before using WithTracing)
+# This loads environment variables and initializes the tracing system
+get_aiqa_client()
 
 @WithTracing
 def my_function(x, y):
@@ -118,11 +126,11 @@ from aiqa import WithTracing, set_conversation_id
 def handle_user_request(user_id: str, session_id: str):
     # Set conversation ID to group all traces for this user session
     set_conversation_id(f"user_{user_id}_session_{session_id}")
-    # All spans created in this function and its children will have this conversation.id
+    # All spans created in this function and its children will have this gen_ai.conversation.id
     # ... rest of function
 ```
 
-The `conversation.id` attribute allows you to filter and group traces in the AIQA server by conversation, making it easier to analyze multi-step interactions or user sessions.
+The `gen_ai.conversation.id` attribute allows you to filter and group traces in the AIQA server by conversation, making it easier to analyze multi-step interactions or user sessions. See the [OpenTelemetry GenAI Events specification](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-events/) for more details.
 
 ### Trace ID Propagation Across Services/Agents
 

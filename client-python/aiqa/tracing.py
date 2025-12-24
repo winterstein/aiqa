@@ -6,6 +6,7 @@ Provides WithTracing decorator to automatically trace function calls.
 import json
 import logging
 import inspect
+import os
 from typing import Any, Callable, Optional, List
 from functools import wraps
 from opentelemetry import trace
@@ -13,7 +14,7 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.trace import Status, StatusCode, SpanContext, TraceFlags
 from opentelemetry.propagate import inject, extract
 from .aiqa_exporter import AIQASpanExporter
-from .client import get_client, AIQA_TRACER_NAME
+from .client import get_aiqa_client, AIQA_TRACER_NAME, get_component_tag, set_component_tag as _set_component_tag
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ async def flush_tracing() -> None:
 
     This flushes both the BatchSpanProcessor and the exporter buffer.
     """
-    client = get_client()
+    client = get_aiqa_client()
     if client.get("provider"):
         client["provider"].force_flush()  # Synchronous method
     if client.get("exporter"):    
@@ -39,7 +40,7 @@ async def shutdown_tracing() -> None:
     It is not necessary to call this function.
     """
     try:
-        client = get_client()
+        client = get_aiqa_client()
         if client.get("provider"):
             client["provider"].shutdown()  # Synchronous method
         if client.get("exporter"):
@@ -54,7 +55,7 @@ __all__ = [
     "get_provider", "get_exporter", "flush_tracing", "shutdown_tracing", "WithTracing",
     "set_span_attribute", "set_span_name", "get_active_span",
     "get_trace_id", "get_span_id", "create_span_from_trace_id", "inject_trace_context", "extract_trace_context",
-    "set_conversation_id"
+    "set_conversation_id", "set_component_tag"
 ]
 
 
@@ -416,6 +417,11 @@ def WithTracing(
             
             logger.debug(f"Span {fn_name} is recording, trace_id={format(span.get_span_context().trace_id, '032x')}")
             
+            # Set component tag if configured
+            component_tag = get_component_tag()
+            if component_tag:
+                span.set_attribute("gen_ai.component.id", component_tag)
+            
             if input_data is not None:
                 span.set_attribute("input", _serialize_for_span(input_data))
             
@@ -431,6 +437,8 @@ def WithTracing(
         
         def _execute_with_span_sync(executor: Callable[[], Any], input_data: Any) -> Any:
             """Execute sync function within span context, handling input/output and exceptions."""
+            # Ensure tracer provider is initialized before creating spans
+            get_aiqa_client()
             with tracer.start_as_current_span(fn_name) as span:
                 if not _setup_span(span, input_data):
                     return executor()
@@ -445,6 +453,8 @@ def WithTracing(
         
         async def _execute_with_span_async(executor: Callable[[], Any], input_data: Any) -> Any:
             """Execute async function within span context, handling input/output and exceptions."""
+            # Ensure tracer provider is initialized before creating spans
+            get_aiqa_client()
             with tracer.start_as_current_span(fn_name) as span:
                 if not _setup_span(span, input_data):
                     return await executor()
@@ -462,6 +472,8 @@ def WithTracing(
         
         def _execute_generator_sync(executor: Callable[[], Any], input_data: Any) -> Any:
             """Execute sync generator function, returning a traced generator."""
+            # Ensure tracer provider is initialized before creating spans
+            get_aiqa_client()
             # Create span but don't use 'with' - span will be closed by TracedGenerator
             span = tracer.start_span(fn_name)
             token = trace.context_api.attach(trace.context_api.set_span_in_context(span))
@@ -483,6 +495,8 @@ def WithTracing(
         
         async def _execute_generator_async(executor: Callable[[], Any], input_data: Any) -> Any:
             """Execute async generator function, returning a traced async generator."""
+            # Ensure tracer provider is initialized before creating spans
+            get_aiqa_client()
             # Create span but don't use 'with' - span will be closed by TracedAsyncGenerator
             span = tracer.start_span(fn_name)
             token = trace.context_api.attach(trace.context_api.set_span_in_context(span))
@@ -588,14 +602,15 @@ def get_active_span() -> Optional[trace.Span]:
 
 def set_conversation_id(conversation_id: str) -> bool:
     """
-    Set the conversation.id attribute on the active span.
+    Set the gen_ai.conversation.id attribute on the active span.
     This allows you to group multiple traces together that are part of the same conversation.
+    See https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-events/ for more details.
     
     Args:
         conversation_id: A unique identifier for the conversation (e.g., user session ID, chat ID, etc.)
     
     Returns:
-        True if conversation.id was set, False if no active span found
+        True if gen_ai.conversation.id was set, False if no active span found
     
     Example:
         from aiqa import WithTracing, set_conversation_id
@@ -606,16 +621,44 @@ def set_conversation_id(conversation_id: str) -> bool:
             set_conversation_id(f"user_{user_id}_session_{request.get('session_id')}")
             # ... rest of function
     """
-    return set_span_attribute("conversation.id", conversation_id)
+    return set_span_attribute("gen_ai.conversation.id", conversation_id)
+
+
+def set_component_tag(tag: str) -> None:
+    """
+    Set the component tag that will be added to all spans created by AIQA.
+    This can also be set via the AIQA_COMPONENT_TAG environment variable.
+    The component tag allows you to identify which component/system generated the spans.
+    
+    Note: If using environment variables, ensure you call get_aiqa_client() first to initialize
+    the client and load environment variables.
+    
+    Args:
+        tag: A component identifier (e.g., "mynamespace.mysystem", "backend.api", etc.)
+    
+    Example:
+        from aiqa import get_aiqa_client, set_component_tag, WithTracing
+        
+        # Initialize client (loads env vars including AIQA_COMPONENT_TAG)
+        get_aiqa_client()
+        
+        # Or set component tag programmatically (overrides env var)
+        set_component_tag("mynamespace.mysystem")
+        
+        @WithTracing
+        def my_function():
+            pass
+    """
+    _set_component_tag(tag)
 
 def get_provider() -> Optional[TracerProvider]:
     """Get the tracer provider for advanced usage."""
-    client = get_client()
+    client = get_aiqa_client()
     return client.get("provider")
 
 def get_exporter() -> Optional[AIQASpanExporter]:
     """Get the exporter for advanced usage."""
-    client = get_client()
+    client = get_aiqa_client()
     return client.get("exporter")
 
 
@@ -710,12 +753,21 @@ def create_span_from_trace_id(
         tracer = trace.get_tracer(AIQA_TRACER_NAME)
         span = tracer.start_span(span_name, context=parent_context)
         
+        # Set component tag if configured
+        component_tag = get_component_tag()
+        if component_tag:
+            span.set_attribute("gen_ai.component.id", component_tag)
+        
         return span
     except (ValueError, AttributeError) as e:
         logger.error(f"Error creating span from trace_id: {e}", exc_info=True)
         # Fallback: create a new span
         tracer = trace.get_tracer(AIQA_TRACER_NAME)
-        return tracer.start_span(span_name)
+        span = tracer.start_span(span_name)
+        component_tag = get_component_tag()
+        if component_tag:
+            span.set_attribute("gen_ai.component.id", component_tag)
+        return span
 
 
 def inject_trace_context(carrier: dict) -> None:

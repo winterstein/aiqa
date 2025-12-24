@@ -13,6 +13,7 @@ go mod download
 ```bash
 export AIQA_SERVER_URL=http://localhost:3000
 export AIQA_API_KEY=your-api-key
+export AIQA_COMPONENT_TAG=mynamespace.mysystem  # Optional: component tag for all spans
 ```
 
 ## Usage
@@ -91,12 +92,26 @@ ctx := context.Background()
 aiqa.SetSpanAttribute(ctx, "custom.attribute", "value")
 ```
 
+### Setting Component Tag
+
+The component tag allows you to identify which component/system generated the spans. It can be set programmatically or via the `AIQA_COMPONENT_TAG` environment variable:
+
+```go
+// Set component tag programmatically
+aiqa.SetComponentTag("mynamespace.mysystem")
+
+// Or set via environment variable:
+// export AIQA_COMPONENT_TAG="mynamespace.mysystem"
+```
+
 ## Configuration
 
 The client can be configured via environment variables or by passing parameters to `InitTracing`:
 
 - `AIQA_SERVER_URL`: URL of the AIQA server (default: empty, must be set)
 - `AIQA_API_KEY`: API key for authentication (default: empty)
+- `AIQA_COMPONENT_TAG`: Component tag to add to all spans (e.g., "mynamespace.mysystem"). Optional.
+- `AIQA_SAMPLING_RATE`: Sampling rate between 0 and 1 (default: 1.0 = sample all). Optional.
 
 ## Flushing Spans
 

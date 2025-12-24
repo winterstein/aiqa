@@ -28,7 +28,15 @@ var (
 	tracer         trace.Tracer
 	exporter       *AIQAExporter
 	samplingRate   float64 = 1.0 // Default: sample all traces
+	componentTag   string  = ""  // Component tag to add to all spans
 )
+
+func init() {
+	// Read component tag from environment variable
+	if envTag := os.Getenv("AIQA_COMPONENT_TAG"); envTag != "" {
+		componentTag = envTag
+	}
+}
 
 const (
 	tracerName = "aiqa-tracer"
@@ -80,6 +88,7 @@ type TracingOptions struct {
 // InitTracing initializes the OpenTelemetry tracer provider with AIQA exporter
 // samplingRate: value between 0 and 1, where 0 = tracing is off, 1 = trace all
 // If not provided, reads from AIQA_SAMPLING_RATE environment variable (default: 1.0)
+// If a TracerProvider already exists, it will add the AIQA exporter to it instead of creating a new one.
 func InitTracing(serverURL, apiKey string, samplingRateArg ...float64) error {
 	if serverURL == "" {
 		serverURL = os.Getenv("AIQA_SERVER_URL")
@@ -108,6 +117,20 @@ func InitTracing(serverURL, apiKey string, samplingRateArg ...float64) error {
 	
 	exporter = NewAIQAExporter(serverURL, apiKey, 5)
 	
+	// Check if a TracerProvider is already set
+	existingProvider := otel.GetTracerProvider()
+	
+	// Try to cast to SDK TracerProvider to see if it's a real provider
+	if sdkProvider, ok := existingProvider.(*sdktrace.TracerProvider); ok {
+		// Real provider already exists, add our span processor to it
+		bsp := sdktrace.NewBatchSpanProcessor(exporter)
+		sdkProvider.RegisterSpanProcessor(bsp)
+		tracerProvider = sdkProvider
+		tracer = otel.Tracer(tracerName)
+		return nil
+	}
+	
+	// No real provider exists, create a new one
 	res, err := resource.New(
 		context.Background(),
 		resource.WithAttributes(
@@ -149,7 +172,9 @@ func FlushSpans(ctx context.Context) error {
 	return nil
 }
 
-// ShutdownTracing shuts down the tracer provider and exporter
+// ShutdownTracing shuts down the tracer provider and exporter.
+// Note: If InitTracing detected and used an existing TracerProvider, calling this
+// will shutdown the entire provider, which may affect other tracing systems. Use with caution.
 func ShutdownTracing(ctx context.Context) error {
 	if tracerProvider != nil {
 		if err := tracerProvider.Shutdown(ctx); err != nil {
@@ -224,6 +249,9 @@ func wrapSyncFunction(fnValue reflect.Value, fnType reflect.Type, fnName string,
 		}
 		defer span.End()
 		
+		// Set component tag if configured
+		setComponentTagIfSet(span)
+		
 		// Prepare input
 		input := prepareInput(args, opt)
 		if input != nil {
@@ -271,6 +299,9 @@ func wrapAsyncFunction(fnValue reflect.Value, fnType reflect.Type, fnName string
 		
 		ctx, span := tracer.Start(ctx, fnName)
 		defer span.End()
+		
+		// Set component tag if configured
+		setComponentTagIfSet(span)
 		
 		// Prepare input
 		input := prepareInput(args, opt)
@@ -408,18 +439,35 @@ func SetSpanAttribute(ctx context.Context, attributeName string, attributeValue 
 	return false
 }
 
+// setComponentTagIfSet sets the component tag on a span if it's configured
+func setComponentTagIfSet(span trace.Span) {
+	if componentTag != "" {
+		span.SetAttributes(attribute.String("component", componentTag))
+	}
+}
+
 // GetActiveSpan returns the active span from context
 func GetActiveSpan(ctx context.Context) trace.Span {
 	return trace.SpanFromContext(ctx)
 }
 
-// SetConversationId sets the conversation.id attribute on the active span.
+// SetConversationId sets the gen_ai.conversation.id attribute on the active span.
 // This allows you to group multiple traces together that are part of the same conversation.
+// See https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-events/ for more details.
 //
 // conversationId: A unique identifier for the conversation (e.g., user session ID, chat ID, etc.)
-// Returns: True if conversation.id was set, False if no active span found
+// Returns: True if gen_ai.conversation.id was set, False if no active span found
 func SetConversationId(ctx context.Context, conversationId string) bool {
-	return SetSpanAttribute(ctx, "conversation.id", conversationId)
+	return SetSpanAttribute(ctx, "gen_ai.conversation.id", conversationId)
+}
+
+// SetComponentTag sets a custom component tag that will be added to all spans created by AIQA.
+// This can also be set via the AIQA_COMPONENT_TAG environment variable.
+// The component tag allows you to identify which component/system generated the spans - e.g. in the AIQA Traces view.
+//
+// tag: A component identifier (e.g., "mynamespace.mysystem", "backend.api", etc.)
+func SetComponentTag(tag string) {
+	componentTag = tag
 }
 
 // GetTraceId gets the current trace ID as a hexadecimal string (32 characters).
@@ -467,7 +515,9 @@ func CreateSpanFromTraceId(ctx context.Context, traceId string, parentSpanId str
 	traceID, err := trace.TraceIDFromHex(traceId)
 	if err != nil {
 		// Fallback: create a new span
-		return tracer.Start(ctx, spanName)
+		ctx, span := tracer.Start(ctx, spanName)
+		setComponentTagIfSet(span)
+		return ctx, span
 	}
 
 	// Parse parent span ID if provided
@@ -492,7 +542,9 @@ func CreateSpanFromTraceId(ctx context.Context, traceId string, parentSpanId str
 	ctx = trace.ContextWithRemoteSpanContext(ctx, spanContext)
 
 	// Start a new span in this context (it will be a child of the parent span)
-	return tracer.Start(ctx, spanName)
+	ctx, span := tracer.Start(ctx, spanName)
+	setComponentTagIfSet(span)
+	return ctx, span
 }
 
 // InjectTraceContext injects the current trace context into a carrier (e.g., HTTP headers).

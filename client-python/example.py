@@ -6,10 +6,14 @@ import asyncio
 import os
 from dotenv import load_dotenv
 import logging
-from aiqa import WithTracing, flush_tracing, shutdown_tracing, set_span_name
+from aiqa import get_aiqa_client, WithTracing, flush_tracing, shutdown_tracing, set_span_name
 
+# Load environment variables from .env file
 load_dotenv()
 
+# Initialize client (must be called before using WithTracing)
+# This loads environment variables and initializes the tracing system
+get_aiqa_client()
 
 logging.basicConfig(level=logging.DEBUG)
 logging.getLogger("aiqa").setLevel(logging.DEBUG)
@@ -17,6 +21,7 @@ logging.getLogger("aiqa").setLevel(logging.DEBUG)
 # Print to verify environment variables are loaded
 print(os.getenv("AIQA_SERVER_URL"))
 print(os.getenv("AIQA_API_KEY"))
+print(f"Component tag: {os.getenv('AIQA_COMPONENT_TAG', 'not set')}")
 
 @WithTracing
 def sync_function(x: int, y: int) -> int:

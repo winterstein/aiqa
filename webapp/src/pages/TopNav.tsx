@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
 import { Navbar, Nav, NavItem, Dropdown, DropdownToggle, DropdownMenu, DropdownItem, NavLink } from 'reactstrap';
+import { Link } from 'react-router-dom';
 import Logo from '../components/Logo';
 import { getOrganisation } from '../api';
 import { useParams } from 'react-router-dom';
@@ -58,6 +59,18 @@ const TopNav: React.FC = () => {
               <DropdownMenu end>
                 <DropdownItem header>
                   {user?.email}
+                </DropdownItem>
+                <DropdownItem divider />
+                <DropdownItem tag={Link} to="/profile">
+                  Profile
+                </DropdownItem>
+                {organisationId && (
+                  <DropdownItem tag={Link} to={`/organisation/${organisationId}/account`}>
+                    Account
+                  </DropdownItem>
+                )}
+                <DropdownItem tag={Link} to="/about">
+                  About this App
                 </DropdownItem>
                 <DropdownItem divider />
                 <DropdownItem

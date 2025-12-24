@@ -74,12 +74,12 @@ import { withTracing, setConversationId } from './src/tracing';
 const tracedFn = withTracing(function handleUserRequest(userId: string, sessionId: string) {
   // Set conversation ID to group all traces for this user session
   setConversationId(`user_${userId}_session_${sessionId}`);
-  // All spans created in this function and its children will have this conversation.id
+  // All spans created in this function and its children will have this gen_ai.conversation.id
   // ... rest of function
 });
 ```
 
-The `conversation.id` attribute allows you to filter and group traces in the AIQA server by conversation, making it easier to analyze multi-step interactions or user sessions.
+The `gen_ai.conversation.id` attribute allows you to filter and group traces in the AIQA server by conversation, making it easier to analyze multi-step interactions or user sessions. See the [OpenTelemetry GenAI Events specification](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-events/) for more details.
 
 ### Trace ID Propagation Across Services/Agents
 
