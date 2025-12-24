@@ -21,14 +21,29 @@ import { searchQueryToSqlWhereClause } from './sql_query.js';
 let pool: Pool | null = null;
 
 /** Allowed fields per table (excluding id, created, updated which are managed by the database)  */
-const TABLE_FIELDS: Record<string, Set<string>> = {
-	organisations: new Set(['name', 'rate_limit_per_hour', 'retention_period_days', 'members']),
-	users: new Set(['email', 'name', 'sub']),
-	api_keys: new Set(['organisation', 'name', 'key_hash', 'rate_limit_per_hour', 'retention_period_days']),
-	datasets: new Set(['organisation', 'name', 'description', 'tags', 'input_schema', 'output_schema', 'metrics']),
-	experiments: new Set(['dataset', 'organisation', 'name', 'parameters', 'comparison_parameters', 'summary_results', 'results']),
-	models: new Set(['organisation', 'name', 'api_key', 'version', 'description']),
+const TABLE_FIELDS = {
+	organisations: getAllowedFieldsFromSchema('Organisation'),
+	users: getAllowedFieldsFromSchema('User'),
+	api_keys: getAllowedFieldsFromSchema('ApiKey'),
+	datasets: getAllowedFieldsFromSchema('Dataset'),
+	experiments: getAllowedFieldsFromSchema('Experiment'),
+	models: getAllowedFieldsFromSchema('Model'),
 };
+
+	/** Use the schema-loader to fetch allowed fields for a given entity type. */
+function getAllowedFieldsFromSchema(typeName: string): Set<string> {
+	
+	const schema = loadSchema(typeName);
+	if (!schema || typeof schema !== 'object') {
+		throw new Error(`Schema not found for type: ${typeName}`);
+	}
+
+	// Accept top-level keys as allowed fields, except for 'id', 'created', 'updated' (managed by DB)
+	const skip = new Set(['id', 'created', 'updated']);
+	const allowed = Object.keys(schema)
+		.filter(key => !skip.has(key));
+	return new Set(allowed);
+}
 
 /**
  * Filter item to only include allowed fields for the given table.
@@ -283,6 +298,39 @@ async function applyMigrations(): Promise<void> {
 		  END IF;
 		END $$;
 	  `);
+	    // add subscription (json object) column to organisations table if it doesn't exist (migration)
+		await doQuery(`
+			DO $$ 
+			BEGIN
+			  IF NOT EXISTS (
+				SELECT 1 FROM information_schema.columns 
+				WHERE table_name = 'organisations' AND column_name = 'subscription'
+			  ) THEN
+				ALTER TABLE organisations ADD COLUMN subscription JSONB;
+			  END IF;
+			END $$;
+		  `);
+	// add   max_members?: number;
+//   max_datasets?: number;
+//   experiment_retention_days?: number;
+//   max_examples_per_dataset?: number;
+//  to organisations table if it doesn't exist (migration)
+// add subscription (json object) column to organisations table if it doesn't exist (migration)
+await doQuery(`
+	DO $$ 
+	BEGIN
+	  IF NOT EXISTS (
+		SELECT 1 FROM information_schema.columns 
+		WHERE table_name = 'organisations' AND column_name = 'max_members'
+	  ) THEN
+		ALTER TABLE organisations ADD COLUMN max_members INT;
+		ALTER TABLE organisations ADD COLUMN max_datasets INT;
+		ALTER TABLE organisations ADD COLUMN experiment_retention_days INT;
+		ALTER TABLE organisations ADD COLUMN max_examples_per_dataset INT;
+	  END IF;
+	END $$;
+  `);
+
 }
 
 /**

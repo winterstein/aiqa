@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import JsonObjectViewer from './JsonObjectViewer';
 import XmlObjectViewer from './XmlObjectViewer';
-import ExpandCollapseButton from './ExpandCollapseButton';
+import ExpandCollapseControl from './ExpandCollapseControl';
+import CopyButton from './CopyButton';
 
 export type Block = {
 	type: 'text' | 'xml' | 'json';
@@ -165,8 +166,9 @@ function TextViewer({ text }: { text: string }) {
 		return (
 			<div>
 				<div className="d-flex align-items-center mb-1">
+					<ExpandCollapseControl hasChildren={true} isExpanded={expanded} onToggle={() => setExpanded(!expanded)} />
 					<span className="text-muted fst-italic me-2">Text ({text.length} characters)</span>
-					<ExpandCollapseButton expanded={expanded} onClick={() => setExpanded(!expanded)} />
+					<span className="ms-2"><CopyButton content={text} logToConsole /></span>
 				</div>
 				{expanded ? (
 					<div dangerouslySetInnerHTML={{ __html: format(text) }} />

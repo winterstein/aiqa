@@ -15,6 +15,7 @@ from opentelemetry.trace import Status, StatusCode, SpanContext, TraceFlags
 from opentelemetry.propagate import inject, extract
 from .aiqa_exporter import AIQASpanExporter
 from .client import get_aiqa_client, AIQA_TRACER_NAME, get_component_tag, set_component_tag as _set_component_tag, get_aiqa_tracer
+from .object_serialiser import serialize_for_span
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,7 @@ __all__ = [
     "get_provider", "get_exporter", "flush_tracing", "shutdown_tracing", "WithTracing",
     "set_span_attribute", "set_span_name", "get_active_span",
     "get_trace_id", "get_span_id", "create_span_from_trace_id", "inject_trace_context", "extract_trace_context",
-    "set_conversation_id", "set_component_tag"
+    "set_conversation_id", "set_component_tag", "set_token_usage", "set_provider_and_model"
 ]
 
 
@@ -126,33 +127,6 @@ class TracingOptions:
         self.filter_output = filter_output
 
 
-def _serialize_for_span(value: Any) -> Any:
-    """
-    Serialize a value for span attributes.
-    OpenTelemetry only accepts primitives (bool, str, bytes, int, float) or sequences of those.
-    Complex types (dicts, lists, objects) are converted to JSON strings.
-    """
-    # Keep primitives as is (including None)
-    if value is None or isinstance(value, (str, int, float, bool, bytes)):
-        return value
-    
-    # For sequences, check if all elements are primitives
-    if isinstance(value, (list, tuple)):
-        # If all elements are primitives, return as list
-        if all(isinstance(item, (str, int, float, bool, bytes, type(None))) for item in value):
-            return list(value)
-        # Otherwise serialize to JSON string
-        try:
-            return json.dumps(value)
-        except (TypeError, ValueError):
-            return str(value)
-    
-    # For dicts and other complex types, serialize to JSON string
-    try:
-        return json.dumps(value)
-    except (TypeError, ValueError):
-        # If JSON serialization fails, convert to string
-        return str(value)
 
 
 def _prepare_input(args: tuple, kwargs: dict) -> Any:
@@ -160,13 +134,13 @@ def _prepare_input(args: tuple, kwargs: dict) -> Any:
     if not args and not kwargs:
         return None
     if len(args) == 1 and not kwargs:
-        return _serialize_for_span(args[0])
+        return serialize_for_span(args[0])
     # Multiple args or kwargs - combine into dict
     result = {}
     if args:
-        result["args"] = [_serialize_for_span(arg) for arg in args]
+        result["args"] = [serialize_for_span(arg) for arg in args]
     if kwargs:
-        result["kwargs"] = {k: _serialize_for_span(v) for k, v in kwargs.items()}
+        result["kwargs"] = {k: serialize_for_span(v) for k, v in kwargs.items()}
     return result
 
 
@@ -209,6 +183,175 @@ def _handle_span_exception(span: trace.Span, exception: Exception) -> None:
     error = exception if isinstance(exception, Exception) else Exception(str(exception))
     span.record_exception(error)
     span.set_status(Status(StatusCode.ERROR, str(error)))
+
+
+def _is_attribute_set(span: trace.Span, attribute_name: str) -> bool:
+    """
+    Check if an attribute is already set on a span.
+    Returns True if the attribute exists, False otherwise.
+    Safe against exceptions.
+    """
+    try:
+        # Try multiple ways to access span attributes (SDK spans may store them differently)
+        # Check public 'attributes' property
+        if hasattr(span, "attributes"):
+            attrs = span.attributes
+            if attrs and attribute_name in attrs:
+                return True
+        
+        # Check private '_attributes' (common in OpenTelemetry SDK)
+        if hasattr(span, "_attributes"):
+            attrs = span._attributes
+            if attrs and attribute_name in attrs:
+                return True
+        
+        # If we can't find the attribute, assume not set (conservative approach)
+        return False
+    except Exception:
+        # If anything goes wrong, assume not set (conservative approach)
+        return False
+
+
+def _extract_and_set_token_usage(span: trace.Span, result: Any) -> None:
+    """
+    Extract OpenAI API style token usage from result and add to span attributes
+    using OpenTelemetry semantic conventions for gen_ai.
+    
+    Looks for usage dict with prompt_tokens, completion_tokens, and total_tokens.
+    Sets gen_ai.usage.input_tokens, gen_ai.usage.output_tokens, and gen_ai.usage.total_tokens.
+    Only sets attributes that are not already set.
+    
+    This function detects token usage from OpenAI API response patterns:
+    - OpenAI Chat Completions API: The 'usage' object contains 'prompt_tokens', 'completion_tokens', and 'total_tokens'.
+      See https://platform.openai.com/docs/api-reference/chat/object (usage field)
+    - OpenAI Completions API: The 'usage' object contains 'prompt_tokens', 'completion_tokens', and 'total_tokens'.
+      See https://platform.openai.com/docs/api-reference/completions/object (usage field)
+    
+    This function is safe against exceptions and will not derail tracing or program execution.
+    """
+    try:
+        if not span.is_recording():
+            return
+        
+        usage = None
+        
+        # Check if result is a dict with 'usage' key
+        try:
+            if isinstance(result, dict):
+                usage = result.get("usage")
+                # Also check if result itself is a usage dict
+                if usage is None and all(key in result for key in ("prompt_tokens", "completion_tokens", "total_tokens")):
+                    usage = result
+            
+            # Check if result has a 'usage' attribute (e.g., OpenAI response object)
+            elif hasattr(result, "usage"):
+                usage = result.usage
+        except Exception:
+            # If accessing result properties fails, just return silently
+            return
+        
+        # Extract token usage if found
+        if isinstance(usage, dict):
+            try:
+                prompt_tokens = usage.get("prompt_tokens")
+                completion_tokens = usage.get("completion_tokens")
+                total_tokens = usage.get("total_tokens")
+                
+                # Only set attributes that are not already set
+                if prompt_tokens is not None and not _is_attribute_set(span, "gen_ai.usage.input_tokens"):
+                    span.set_attribute("gen_ai.usage.input_tokens", prompt_tokens)
+                if completion_tokens is not None and not _is_attribute_set(span, "gen_ai.usage.output_tokens"):
+                    span.set_attribute("gen_ai.usage.output_tokens", completion_tokens)
+                if total_tokens is not None and not _is_attribute_set(span, "gen_ai.usage.total_tokens"):
+                    span.set_attribute("gen_ai.usage.total_tokens", total_tokens)
+            except Exception:
+                # If setting attributes fails, log but don't raise
+                logger.debug(f"Failed to set token usage attributes on span", exc_info=True)
+    except Exception:
+        # Catch any other exceptions to ensure this never derails tracing
+        logger.debug(f"Error in _extract_and_set_token_usage", exc_info=True)
+
+
+def _extract_and_set_provider_and_model(span: trace.Span, result: Any) -> None:
+    """
+    Extract provider and model information from result and add to span attributes
+    using OpenTelemetry semantic conventions for gen_ai.
+    
+    Looks for 'model', 'provider', 'provider_name' fields in the result.
+    Sets gen_ai.provider.name and gen_ai.request.model.
+    Only sets attributes that are not already set.
+    
+    This function detects model information from common API response patterns:
+    - OpenAI Chat Completions API: The 'model' field is at the top level of the response.
+      See https://platform.openai.com/docs/api-reference/chat/object
+    - OpenAI Completions API: The 'model' field is at the top level of the response.
+      See https://platform.openai.com/docs/api-reference/completions/object
+    
+    This function is safe against exceptions and will not derail tracing or program execution.
+    """
+    try:
+        if not span.is_recording():
+            return
+        
+        model = None
+        provider = None
+        
+        # Check if result is a dict
+        try:
+            if isinstance(result, dict):
+                model = result.get("model") or result.get("Model")
+                provider = result.get("provider") or result.get("Provider") or result.get("provider_name") or result.get("providerName")
+            
+            # Check if result has attributes (e.g., OpenAI response object)
+            elif hasattr(result, "model"):
+                model = result.model
+            if hasattr(result, "provider"):
+                provider = result.provider
+            elif hasattr(result, "provider_name"):
+                provider = result.provider_name
+            elif hasattr(result, "providerName"):
+                provider = result.providerName
+            
+            # Check nested structures (e.g., response.data.model)
+            if model is None and hasattr(result, "data"):
+                data = result.data
+                if isinstance(data, dict):
+                    model = data.get("model") or data.get("Model")
+                elif hasattr(data, "model"):
+                    model = data.model
+            
+            # Check for model in choices (OpenAI pattern)
+            if model is None and isinstance(result, dict):
+                choices = result.get("choices")
+                if choices and isinstance(choices, list) and len(choices) > 0:
+                    first_choice = choices[0]
+                    if isinstance(first_choice, dict):
+                        model = first_choice.get("model")
+                    elif hasattr(first_choice, "model"):
+                        model = first_choice.model
+        except Exception:
+            # If accessing result properties fails, just return silently
+            return
+        
+        # Set attributes if found and not already set
+        try:
+            if model is not None and not _is_attribute_set(span, "gen_ai.request.model"):
+                # Convert to string if needed
+                model_str = str(model) if model is not None else None
+                if model_str:
+                    span.set_attribute("gen_ai.request.model", model_str)
+            
+            if provider is not None and not _is_attribute_set(span, "gen_ai.provider.name"):
+                # Convert to string if needed
+                provider_str = str(provider) if provider is not None else None
+                if provider_str:
+                    span.set_attribute("gen_ai.provider.name", provider_str)
+        except Exception:
+            # If setting attributes fails, log but don't raise
+            logger.debug(f"Failed to set provider/model attributes on span", exc_info=True)
+    except Exception:
+        # Catch any other exceptions to ensure this never derails tracing
+        logger.debug(f"Error in _extract_and_set_provider_and_model", exc_info=True)
 
 
 class TracedGenerator:
@@ -258,6 +401,12 @@ class TracedGenerator:
     
     def _finalize_span_success(self):
         """Set output and success status on span."""
+        # Check last yielded value for token usage (common pattern in streaming responses)
+        if self._yielded_values:
+            last_value = self._yielded_values[-1]
+            _extract_and_set_token_usage(self._span, last_value)
+            _extract_and_set_provider_and_model(self._span, last_value)
+        
         # Record summary of yielded values
         output_data = {
             "type": "generator",
@@ -268,13 +417,13 @@ class TracedGenerator:
         if self._yielded_values:
             sample_size = min(10, len(self._yielded_values))
             output_data["sample_values"] = [
-                _serialize_for_span(v) for v in self._yielded_values[:sample_size]
+                serialize_for_span(v) for v in self._yielded_values[:sample_size]
             ]
             if len(self._yielded_values) > sample_size:
                 output_data["truncated"] = True
         
         output_data = _prepare_and_filter_output(output_data, self._filter_output, self._ignore_output)
-        self._span.set_attribute("output", _serialize_for_span(output_data))
+        self._span.set_attribute("output", serialize_for_span(output_data))
         self._span.set_status(Status(StatusCode.OK))
 
 
@@ -325,6 +474,12 @@ class TracedAsyncGenerator:
     
     def _finalize_span_success(self):
         """Set output and success status on span."""
+        # Check last yielded value for token usage (common pattern in streaming responses)
+        if self._yielded_values:
+            last_value = self._yielded_values[-1]
+            _extract_and_set_token_usage(self._span, last_value)
+            _extract_and_set_provider_and_model(self._span, last_value)
+        
         # Record summary of yielded values
         output_data = {
             "type": "async_generator",
@@ -335,13 +490,13 @@ class TracedAsyncGenerator:
         if self._yielded_values:
             sample_size = min(10, len(self._yielded_values))
             output_data["sample_values"] = [
-                _serialize_for_span(v) for v in self._yielded_values[:sample_size]
+                serialize_for_span(v) for v in self._yielded_values[:sample_size]
             ]
             if len(self._yielded_values) > sample_size:
                 output_data["truncated"] = True
         
         output_data = _prepare_and_filter_output(output_data, self._filter_output, self._ignore_output)
-        self._span.set_attribute("output", _serialize_for_span(output_data))
+        self._span.set_attribute("output", serialize_for_span(output_data))
         self._span.set_status(Status(StatusCode.OK))
 
 
@@ -423,7 +578,7 @@ def WithTracing(
                 span.set_attribute("gen_ai.component.id", component_tag)
             
             if input_data is not None:
-                span.set_attribute("input", _serialize_for_span(input_data))
+                span.set_attribute("input", serialize_for_span(input_data))
             
             trace_id = format(span.get_span_context().trace_id, "032x")
             logger.debug(f"do traceable stuff {fn_name} {trace_id}")
@@ -431,8 +586,13 @@ def WithTracing(
         
         def _finalize_span_success(span: trace.Span, result: Any) -> None:
             """Set output and success status on span."""
+            # Extract and set token usage if present (before filtering output)
+            _extract_and_set_token_usage(span, result)
+            # Extract and set provider/model if present (before filtering output)
+            _extract_and_set_provider_and_model(span, result)
+            
             output_data = _prepare_and_filter_output(result, filter_output, ignore_output)
-            span.set_attribute("output", _serialize_for_span(output_data))
+            span.set_attribute("output", serialize_for_span(output_data))
             span.set_status(Status(StatusCode.OK))
         
         def _execute_with_span_sync(executor: Callable[[], Any], input_data: Any) -> Any:
@@ -581,7 +741,7 @@ def set_span_attribute(attribute_name: str, attribute_value: Any) -> bool:
     """
     span = trace.get_current_span()
     if span and span.is_recording():
-        span.set_attribute(attribute_name, _serialize_for_span(attribute_value))
+        span.set_attribute(attribute_name, serialize_for_span(attribute_value))
         return True
     return False
 
@@ -622,6 +782,110 @@ def set_conversation_id(conversation_id: str) -> bool:
             # ... rest of function
     """
     return set_span_attribute("gen_ai.conversation.id", conversation_id)
+
+
+def set_token_usage(
+    input_tokens: Optional[int] = None,
+    output_tokens: Optional[int] = None,
+    total_tokens: Optional[int] = None,
+) -> bool:
+    """
+    Set token usage attributes on the active span using OpenTelemetry semantic conventions for gen_ai.
+    This allows you to explicitly record token usage information.
+    AIQA tracing will automatically detect and set token usage from standard OpenAI-like API responses.
+    See https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/ for more details.
+    
+    Args:
+        input_tokens: Number of input tokens used (maps to gen_ai.usage.input_tokens)
+        output_tokens: Number of output tokens generated (maps to gen_ai.usage.output_tokens)
+        total_tokens: Total number of tokens used (maps to gen_ai.usage.total_tokens)
+    
+    Returns:
+        True if at least one token usage attribute was set, False if no active span found
+    
+    Example:
+        from aiqa import WithTracing, set_token_usage
+        
+        @WithTracing
+        def call_llm(prompt: str):
+            response = openai_client.chat.completions.create(...)
+            # Explicitly set token usage
+            set_token_usage(
+                input_tokens=response.usage.prompt_tokens,
+                output_tokens=response.usage.completion_tokens,
+                total_tokens=response.usage.total_tokens
+            )
+            return response
+    """
+    span = trace.get_current_span()
+    if not span or not span.is_recording():
+        return False
+    
+    set_count = 0
+    try:
+        if input_tokens is not None:
+            span.set_attribute("gen_ai.usage.input_tokens", input_tokens)
+            set_count += 1
+        if output_tokens is not None:
+            span.set_attribute("gen_ai.usage.output_tokens", output_tokens)
+            set_count += 1
+        if total_tokens is not None:
+            span.set_attribute("gen_ai.usage.total_tokens", total_tokens)
+            set_count += 1
+    except Exception as e:
+        logger.warning(f"Failed to set token usage attributes: {e}", exc_info=True)
+        return False
+    
+    return set_count > 0
+
+
+def set_provider_and_model(
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+) -> bool:
+    """
+    Set provider and model attributes on the active span using OpenTelemetry semantic conventions for gen_ai.
+    This allows you to explicitly record provider and model information.
+    AIQA tracing will automatically detect and set provider/model from standard API responses.
+    See https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/ for more details.
+    
+    Args:
+        provider: Name of the AI provider (e.g., "openai", "anthropic", "google") (maps to gen_ai.provider.name)
+        model: Name of the model used (e.g., "gpt-4", "claude-3-5-sonnet") (maps to gen_ai.request.model)
+    
+    Returns:
+        True if at least one attribute was set, False if no active span found
+    
+    Example:
+        from aiqa import WithTracing, set_provider_and_model
+        
+        @WithTracing
+        def call_llm(prompt: str):
+            response = openai_client.chat.completions.create(...)
+            # Explicitly set provider and model
+            set_provider_and_model(
+                provider="openai",
+                model=response.model
+            )
+            return response
+    """
+    span = trace.get_current_span()
+    if not span or not span.is_recording():
+        return False
+    
+    set_count = 0
+    try:
+        if provider is not None:
+            span.set_attribute("gen_ai.provider.name", str(provider))
+            set_count += 1
+        if model is not None:
+            span.set_attribute("gen_ai.request.model", str(model))
+            set_count += 1
+    except Exception as e:
+        logger.warning(f"Failed to set provider/model attributes: {e}", exc_info=True)
+        return False
+    
+    return set_count > 0
 
 
 def set_component_tag(tag: str) -> None:

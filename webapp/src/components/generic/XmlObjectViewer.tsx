@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import CopyButton from './CopyButton';
-import ExpandCollapseButton from './ExpandCollapseButton';
+import ExpandCollapseControl from './ExpandCollapseControl';
 
 interface XmlNode {
 	tag: string;
@@ -73,10 +73,10 @@ function XmlNodeViewer({ node, textComponent }: { node: XmlNode, textComponent?:
 		return (
 			<div className="border rounded p-2 my-2" style={{ borderColor: '#e0e0e0' }}>
 				<div className="d-flex align-items-center mb-1">
+					<ExpandCollapseControl hasChildren={true} isExpanded={false} onToggle={() => setExpanded(true)} />
 					<span className="text-muted fst-italic me-2">
 						&lt;{node.tag}{attributeString}&gt; ({node.children.length} {node.children.length === 1 ? 'child' : 'children'})
 					</span>
-					<ExpandCollapseButton expanded={false} onClick={() => setExpanded(true)} />
 					{hasContent && <span className="ms-2">{$copyButton}</span>}
 				</div>
 			</div>
@@ -86,10 +86,10 @@ function XmlNodeViewer({ node, textComponent }: { node: XmlNode, textComponent?:
 	return (
 		<div className="border rounded p-2 my-2" style={{ borderColor: '#e0e0e0' }}>
 			<div className="d-flex align-items-center mb-1">
+				<ExpandCollapseControl hasChildren={true} isExpanded={true} onToggle={() => setExpanded(false)} />
 				<span className="fw-bold me-2" style={{ color: '#555' }}>
 					&lt;{node.tag}{attributeString}&gt;
 				</span>
-				<ExpandCollapseButton expanded={true} onClick={() => setExpanded(false)} />
 				{hasContent && <span className="ms-2">{$copyButton}</span>}
 			</div>
 			{node.children.map((child, index) => {
@@ -136,8 +136,8 @@ export default function XmlObjectViewer({ xml, textComponent }: { xml: string, t
 			return (
 				<div className="border rounded p-2 my-2" style={{ borderColor: '#e0e0e0' }}>
 					<div className="d-flex align-items-center mb-1">
+						<ExpandCollapseControl hasChildren={true} isExpanded={expanded} onToggle={() => setExpanded(!expanded)} />
 						<span className="text-muted fst-italic me-2">XML ({xml.length} characters, parse failed)</span>
-						<ExpandCollapseButton expanded={expanded} onClick={() => setExpanded(!expanded)} />
 						<span className="ms-2">{$copyButton}</span>
 					</div>
 					{expanded && (

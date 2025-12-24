@@ -45,6 +45,27 @@ const getDuration = (span: Span): number | null => {
   return null;
 };
 
+const getTotalTokenCount = (span: Span): number | null => {
+  const attributes = (span as any).attributes || {};
+  const totalTokens = attributes['gen_ai.usage.total_tokens'] as number | undefined;
+  if (totalTokens !== undefined) {
+    return totalTokens;
+  }
+  // Calculate from input + output if total not available
+  const inputTokens = attributes['gen_ai.usage.input_tokens'] as number | undefined;
+  const outputTokens = attributes['gen_ai.usage.output_tokens'] as number | undefined;
+  if (inputTokens !== undefined || outputTokens !== undefined) {
+    return (inputTokens || 0) + (outputTokens || 0);
+  }
+  return null;
+};
+
+const getCost = (span: Span): number | null => {
+  const attributes = (span as any).attributes || {};
+  const cost = attributes['gen_ai.cost.usd'] as number | undefined;
+  return cost !== undefined ? cost : null;
+};
+
 const TracesListPage: React.FC = () => {
   const { organisationId } = useParams<{ organisationId: string }>();
   const navigate = useNavigate();
@@ -120,7 +141,51 @@ const TracesListPage: React.FC = () => {
         cell: ({ row }) => {
           const duration = getDuration(row.original);
           console.log('[TracesListPage] duration cell render:', { duration, span: row.original });
-          return <span>{duration !== null ? `${Math.round(duration / 1000)}s` : ''}</span>;
+          if (duration === null) return <span>N/A</span>;
+          // Format duration nicely
+          if (duration < 1000) {
+            return <span>{Math.round(duration)}ms</span>;
+          } else if (duration < 60000) {
+            return <span>{(duration / 1000).toFixed(2)}s</span>;
+          } else {
+            const minutes = Math.floor(duration / 60000);
+            const seconds = ((duration % 60000) / 1000).toFixed(0);
+            return <span>{minutes}m {seconds}s</span>;
+          }
+        },
+        enableSorting: true,
+      },
+      {
+        id: 'totalTokens',
+        header: 'Total Tokens',
+        accessorFn: (row) => {
+          const tokenCount = getTotalTokenCount(row);
+          return tokenCount !== null ? tokenCount : null;
+        },
+        cell: ({ row }) => {
+          const tokenCount = getTotalTokenCount(row.original);
+          return <span>{tokenCount !== null ? tokenCount.toLocaleString() : 'N/A'}</span>;
+        },
+        enableSorting: true,
+      },
+      {
+        id: 'cost',
+        header: 'Cost (USD)',
+        accessorFn: (row) => {
+          const cost = getCost(row);
+          return cost !== null ? cost : null;
+        },
+        cell: ({ row }) => {
+          const cost = getCost(row.original);
+          if (cost === null) return <span>N/A</span>;
+          // Format cost with appropriate precision
+          if (cost < 0.01) {
+            return <span>${cost.toFixed(4)}</span>;
+          } else if (cost < 1) {
+            return <span>${cost.toFixed(3)}</span>;
+          } else {
+            return <span>${cost.toFixed(2)}</span>;
+          }
         },
         enableSorting: true,
       },

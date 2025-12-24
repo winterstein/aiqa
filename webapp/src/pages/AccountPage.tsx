@@ -17,9 +17,12 @@ const AccountPage: React.FC = () => {
 
   // For now, everyone starts on Trial
   // In a real implementation, this would come from the organisation object or a separate subscription API
-  const subscriptionPackage: SubscriptionPackage = 'Trial';
+  const subscriptionPackage: SubscriptionPackage = organisation?.subscription?.type as SubscriptionPackage;
 
-  const getSubscriptionBadgeColor = (pkg: SubscriptionPackage) => {
+  const getSubscriptionBadgeColor = (pkg: SubscriptionPackage|null) => {
+    if (!pkg) {
+      return 'secondary';
+    }
     switch (pkg) {
       case 'Trial':
         return 'secondary';
@@ -32,7 +35,10 @@ const AccountPage: React.FC = () => {
     }
   };
 
-  const getSubscriptionDescription = (pkg: SubscriptionPackage) => {
+  const getSubscriptionDescription = (pkg: SubscriptionPackage|null) => {
+    if (!pkg) {
+      return '';
+    }
     switch (pkg) {
       case 'Trial':
         return 'You are currently on a Trial plan. Send feedback to upgrade to Free or contact us for Enterprise.';
@@ -87,7 +93,7 @@ const AccountPage: React.FC = () => {
                 <h6>
                   Current Plan:{' '}
                   <Badge color={getSubscriptionBadgeColor(subscriptionPackage)}>
-                    {subscriptionPackage}
+                    {subscriptionPackage ?? 'Unknown'}
                   </Badge>
                 </h6>
                 <p className="text-muted">{getSubscriptionDescription(subscriptionPackage)}</p>

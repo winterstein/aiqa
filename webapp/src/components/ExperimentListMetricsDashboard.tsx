@@ -40,8 +40,31 @@ function processMetricData(metrics: Metric[], experiments: Experiment[], dataset
 			// It could be directly under the metric name, or under a nested structure
 			let metricValue: any = summaryResults[metric.name];
 			
+			// If the value is an object (nested structure like {mean: 835.8, max: 985, ...}),
+			// extract a numeric value from common statistical keys
+			if (metricValue !== null && metricValue !== undefined && typeof metricValue === 'object' && !Array.isArray(metricValue)) {
+				// Prefer mean, then avg/average, then median, then just take the first numeric value found
+				const preferredKeys = ['mean', 'avg', 'average', 'median', 'min', 'max'];
+				for (const key of preferredKeys) {
+					if (metricValue[key] !== undefined && metricValue[key] !== null) {
+						metricValue = metricValue[key];
+						break;
+					}
+				}
+				// If no preferred key found, try to find any numeric value in the object
+				if (typeof metricValue === 'object') {
+					for (const key in metricValue) {
+						const val = metricValue[key];
+						if (typeof val === 'number' || (typeof val === 'string' && !isNaN(parseFloat(val)))) {
+							metricValue = val;
+							break;
+						}
+					}
+				}
+			}
+			
 			// If not found directly, try common variations (avg, mean, etc.)
-			if (metricValue === undefined || metricValue === null) {
+			if (metricValue === undefined || metricValue === null || (typeof metricValue === 'object' && !Array.isArray(metricValue))) {
 				const variations = [
 					`avg_${metric.name}`,
 					`mean_${metric.name}`,

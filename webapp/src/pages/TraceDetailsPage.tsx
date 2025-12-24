@@ -1,13 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Container, Row, Col } from 'reactstrap';
 import { useQuery } from '@tanstack/react-query';
 import { createExampleFromSpans, listDatasets, searchSpans } from '../api';
 import { Span } from '../common/types';
-import { getSpanId, getStartTime, getEndTime, getDurationMs } from '../utils/span-utils';
+import { getSpanId, getStartTime, getEndTime, getDurationMs, getDurationUnits } from '../utils/span-utils';
 import TextWithStructureViewer from '../components/generic/TextWithStructureViewer';
 import CopyButton from '../components/generic/CopyButton';
+import ExpandCollapseControl from '../components/generic/ExpandCollapseControl';
 import { useToast } from '../utils/toast';
+import { durationString } from '../utils/span-utils';
 
 interface SpanTree {
 	span: Span;
@@ -23,26 +25,66 @@ function collectSpansFromTree(spanTree: SpanTree): Span[] {
 	return spans;
 }
 
+function getParentSpanId(span: Span): string | null {
+	return (span as any).parentSpanId || (span as any).span?.parent?.id || null;
+}
+
+function getAllPossibleSpanIds(span: Span): Set<string> {
+	const ids = new Set<string>();
+	// Check all possible ID fields that might be used as parent references
+	const possibleIds = [
+		(span as any).clientSpanId,
+		(span as any).spanId,
+		(span as any).span?.id,
+		(span as any).client_span_id,
+	];
+	possibleIds.forEach(id => {
+		if (id && id !== 'N/A') {
+			ids.add(String(id));
+		}
+	});
+	// Also add the result from getSpanId (which uses the same logic)
+	const spanId = getSpanId(span);
+	if (spanId && spanId !== 'N/A') {
+		ids.add(spanId);
+	}
+	return ids;
+}
+
 function organiseSpansIntoTree(spans: Span[], parent: Span | null): SpanTree | null {
 	if ( ! parent) {
-		const roots = spans.filter(span => {
-			const parentSpanId = (span as any).parentSpanId || (span as any).span?.parent?.id;
-			return !parentSpanId;
-		});
+		const roots = spans.filter(span => !getParentSpanId(span));
 		if ( ! roots.length) {
 			return null;
 		}
-		return organiseSpansIntoTree(spans, roots[0]);
+		// If there's only one root, return its tree
+		if (roots.length === 1) {
+			return organiseSpansIntoTree(spans, roots[0]);
+		}
+		// If there are multiple roots, create a virtual root with all roots as children
+		const virtualRoot: Span = {
+			...roots[0],
+			name: 'Multiple Root Spans',
+		} as Span;
+		const tree: SpanTree = {
+			span: virtualRoot,
+			children: roots.map(root => organiseSpansIntoTree(spans, root)).filter((child): child is SpanTree => child !== null),
+		};
+		return tree;
 	}
-	const parentId = getSpanId(parent);
-    const childSpans = spans.filter(span => {
-		const spanParentId = (span as any).parentSpanId || (span as any).span?.parent?.id;
-		return spanParentId === parentId;
+	
+	const parentIds = getAllPossibleSpanIds(parent);
+	const childSpans = spans.filter(span => {
+		const spanParentId = getParentSpanId(span);
+		if (!spanParentId) return false;
+		// Check if this span's parent ID matches any of the parent's possible IDs
+		return parentIds.has(spanParentId);
 	});
-    const tree: SpanTree = {
-        span: parent,
-        children: childSpans.map(childSpan => organiseSpansIntoTree(spans, childSpan)).filter((child): child is SpanTree => child !== null),
-    };
+	
+	const tree: SpanTree = {
+		span: parent,
+		children: childSpans.map(childSpan => organiseSpansIntoTree(spans, childSpan)).filter((child): child is SpanTree => child !== null),
+	};
 	return tree;
 }
 
@@ -60,6 +102,13 @@ const TraceDetailsPage: React.FC = () => {
   });
   // organise the traceSpans into a tree of spans, with the root span at the top
   const spanTree = traceSpans ? organiseSpansIntoTree(traceSpans, null) : null;
+  
+  // Calculate duration unit from root span (longest duration) for consistent display across all spans
+  const durationUnit = useMemo(() => {
+    if (!spanTree) return null;
+    const rootDurationMs = getDurationMs(spanTree.span);
+    return getDurationUnits(rootDurationMs);
+  }, [spanTree]);
 
   const {data:datasets, isLoading:isLoadingDataSets} = useQuery({
      queryKey: ['datasets'],
@@ -69,6 +118,26 @@ const TraceDetailsPage: React.FC = () => {
 	 },
 	 enabled: !!organisationId
   });
+
+  // State for selected span and expanded spans
+  const [selectedSpanId, setSelectedSpanId] = useState<string | null>(null);
+  const [expandedSpanIds, setExpandedSpanIds] = useState<Set<string>>(new Set());
+
+  // Initialize selected span to the root span when tree is loaded
+  useEffect(() => {
+    if (spanTree && !selectedSpanId) {
+      const rootSpanId = getSpanId(spanTree.span);
+      setSelectedSpanId(rootSpanId);
+      // Expand all spans initially
+      const allSpanIds = new Set<string>();
+      const collectAllSpanIds = (tree: SpanTree) => {
+        allSpanIds.add(getSpanId(tree.span));
+        tree.children.forEach(child => collectAllSpanIds(child));
+      };
+      collectAllSpanIds(spanTree);
+      setExpandedSpanIds(allSpanIds);
+    }
+  }, [spanTree, selectedSpanId]);
 
   /** spans must be from the same trace */
   const addToDataSet = async (spanTree: SpanTree) => {
@@ -85,8 +154,59 @@ const TraceDetailsPage: React.FC = () => {
 	console.log(ok);
 };
 
+  const toggleExpanded = useCallback((spanId: string) => {
+    setExpandedSpanIds(prev => {
+      const next = new Set(prev);
+      if (next.has(spanId)) {
+        next.delete(spanId);
+      } else {
+        next.add(spanId);
+      }
+      return next;
+    });
+  }, []);
 
-  const topSpan = spanTree?.span;
+  const handleSelectSpan = useCallback((spanId: string) => {
+    setSelectedSpanId(spanId);
+  }, []);
+
+  // Find the selected span from the tree or original spans array
+  function findSpanById(tree: SpanTree, id: string): Span | null {
+    const treeSpanId = getSpanId(tree.span);
+    if (treeSpanId === id) {
+      return tree.span;
+    }
+    for (const child of tree.children) {
+      const found = findSpanById(child, id);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  const selectedSpan = useMemo(() => {
+    if (!selectedSpanId) return null;
+    
+    // First try to find in the tree
+    if (spanTree) {
+      const foundInTree = findSpanById(spanTree, selectedSpanId);
+      if (foundInTree) {
+        return foundInTree;
+      }
+    }
+    
+    // Fallback: search in original spans array
+    if (traceSpans) {
+      const foundInSpans = traceSpans.find(span => {
+        const spanId = getSpanId(span);
+        return spanId === selectedSpanId;
+      });
+      if (foundInSpans) {
+        return foundInSpans;
+      }
+    }
+    
+    return null;
+  }, [spanTree, selectedSpanId, traceSpans]);
 
   return (
     <Container className="mt-4">
@@ -95,23 +215,34 @@ const TraceDetailsPage: React.FC = () => {
           <Link to={`/organisation/${organisationId}/traces`} className="btn btn-link mb-3">
             ← Back to Traces
           </Link>
-          {topSpan && (
-            <>
-              <h1>{(topSpan as any).name || 'Unnamed Span'}</h1>
-              <div className="mb-3">
-                <div>
-                  <strong>Date:</strong> {getStartTime(topSpan)?.toLocaleString() || 'N/A'}
-                </div>
-                <div>
-                  <strong>Duration:</strong> {getDurationMs(topSpan) ? `${getDurationMs(topSpan)}ms` : 'N/A'}
-                </div>
-                <div>
-                  <strong>Trace ID:</strong> <code>{traceId}</code>
-                </div>
-              </div>
-            </>
+          <h1>Trace: <code>{traceId}</code></h1>
+        </Col>
+      </Row>
+      <Row>
+        <Col md={4}>
+          <h3>Span Tree</h3>
+          {spanTree && (
+            <SpanTreeViewer 
+              spanTree={spanTree} 
+              selectedSpanId={selectedSpanId}
+              expandedSpanIds={expandedSpanIds}
+              onSelectSpan={handleSelectSpan}
+              onToggleExpanded={toggleExpanded}
+              durationUnit={durationUnit}
+            />
           )}
-          {spanTree && <SpanTreeViewer spanTree={spanTree} addToDataSet={addToDataSet} />}
+        </Col>
+        <Col md={8}>
+          <h3>Span Details</h3>
+          {selectedSpan ? (
+            <SpanDetails span={selectedSpan} />
+          ) : (
+            <div>Select a span to view details</div>
+          )}
+        </Col>
+      </Row>
+      <Row>
+        <Col>
           <FullJson json={traceSpans} />
         </Col>
       </Row>
@@ -127,7 +258,7 @@ function FullJson({ json }: { json: any }) {
 		<div style={{ marginTop: '30px', padding: '15px', border: '1px solid #ddd', borderRadius: '4px', backgroundColor: '#f9f9f9' }}>
 		  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
 			<strong>Full trace JSON</strong>
-			<CopyButton content={jsonString} showToast={showToast} />
+			<CopyButton content={json} showToast={showToast} logToConsole  successMessage="Copied json to clipboard and logged to console." />
 		  </div>
 		  <pre style={{ 
 			fontSize: '11px', 
@@ -145,10 +276,77 @@ function FullJson({ json }: { json: any }) {
 	  )
 }
 
-function SpanTreeViewer({ spanTree, addToDataSet }: { spanTree: SpanTree, addToDataSet: (spanTree: SpanTree) => Promise<void> }) {
-	const [expanded, setExpanded] = useState(true);
+function SpanTreeViewer({ 
+	spanTree, 
+	selectedSpanId,
+	expandedSpanIds,
+	onSelectSpan,
+	onToggleExpanded,
+	durationUnit
+}: { 
+	spanTree: SpanTree;
+	selectedSpanId: string | null;
+	expandedSpanIds: Set<string>;
+	onSelectSpan: (spanId: string) => void;
+	onToggleExpanded: (spanId: string) => void;
+	durationUnit: 'ms' | 's' | 'm' | 'h' | 'd' | null | undefined;
+}) {
 	const span = spanTree.span;
 	const children = spanTree.children;
+	const spanId = getSpanId(span);
+	const isExpanded = expandedSpanIds.has(spanId);
+	const isSelected = selectedSpanId === spanId;
+
+	const handleSelect = (e: React.MouseEvent) => {
+		e.preventDefault();
+		e.stopPropagation();
+		onSelectSpan(spanId);
+	};
+
+	return (
+		<div style={{ marginLeft: '20px', marginTop: '5px', borderLeft: '2px solid #ccc', paddingLeft: '10px' }}>
+			<div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', marginBottom: '5px' }}>
+				<ExpandCollapseControl 
+					hasChildren={children.length > 0}
+					isExpanded={isExpanded}
+					onToggle={() => onToggleExpanded(spanId)}
+				/>
+				<div 
+					style={{ 
+						flex: 1,
+						cursor: 'pointer',
+						padding: '5px',
+						borderRadius: '4px',
+						backgroundColor: isSelected ? '#e3f2fd' : 'transparent',
+						border: isSelected ? '2px solid #2196f3' : '2px solid transparent',
+					}}
+					onClick={handleSelect}
+				>
+					<div>Span ID: {spanId}</div>
+					<div>Name: {(span as any).name || 'Unnamed'}</div>
+					<div>Duration: <span>{durationString(getDurationMs(span), durationUnit)}</span></div>
+				</div>
+			</div>
+			{isExpanded && children.length > 0 && (
+				<div>
+					{children.map(kid => (
+						<SpanTreeViewer 
+							key={getSpanId(kid.span)} 
+							spanTree={kid}
+							selectedSpanId={selectedSpanId}
+							expandedSpanIds={expandedSpanIds}
+							onSelectSpan={onSelectSpan}
+							onToggleExpanded={onToggleExpanded}
+							durationUnit={durationUnit}
+						/>
+					))}
+				</div>
+			)}
+		</div>
+	);
+}
+
+function SpanDetails({ span }: { span: Span }) {
 	const spanId = getSpanId(span);
 	const input = (span as any).attributes?.input;
 	const output = (span as any).attributes?.output;
@@ -162,53 +360,32 @@ function SpanTreeViewer({ spanTree, addToDataSet }: { spanTree: SpanTree, addToD
 		: null;
 
 	return (
-		<div style={{ marginLeft: '20px', marginTop: '10px', borderLeft: '2px solid #ccc', paddingLeft: '10px' }}>
-			<div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '5px' }}>
-				{children.length > 0 && (
-					<button 
-						onClick={() => setExpanded(!expanded)}
-						style={{ 
-							background: 'none', 
-							border: 'none', 
-							cursor: 'pointer',
-							fontSize: '14px',
-							padding: '2px 5px'
-						}}
-					>
-						{expanded ? '▼' : '▶'}
-					</button>
-				)}
-				{children.length === 0 && <span style={{ width: '20px' }}></span>}
-				<div style={{ flex: 1 }}>
-					<div><strong>Span ID:</strong> {spanId}</div>
-					<div><strong>Name:</strong> {(span as any).name || 'Unnamed'}</div>
-					{inputText && (
-						<div style={{ marginTop: '10px' }}>
-							<strong>Input:</strong>
-							<div style={{ marginLeft: '10px', marginTop: '5px' }}>
-								<TextWithStructureViewer text={inputText} />
-							</div>
-						</div>
-					)}
-					{outputText && (
-						<div style={{ marginTop: '10px' }}>
-							<strong>Output:</strong>
-							<div style={{ marginLeft: '10px', marginTop: '5px' }}>
-								<TextWithStructureViewer text={outputText} />
-							</div>
-						</div>
-					)}
-				</div>
+		<div style={{ padding: '15px', border: '1px solid #ddd', borderRadius: '4px', backgroundColor: '#f9f9f9' }}>
+			<div style={{ marginBottom: '15px' }}>
+				<div><strong>Span ID:</strong> {spanId}</div>
+				<div><strong>Name:</strong> {(span as any).name || 'Unnamed Span'}</div>
+				<div><strong>Date:</strong> {getStartTime(span)?.toLocaleString() || 'N/A'}</div>
+				<div><strong>Duration:</strong> {getDurationMs(span) ? `${getDurationMs(span)}ms` : 'N/A'}</div>
 			</div>
-			{expanded && children.length > 0 && (
-				<div>
-					{children.map(kid => (
-						<SpanTreeViewer 
-							key={getSpanId(kid.span)} 
-							spanTree={kid} 
-							addToDataSet={addToDataSet} 
-						/>
-					))}
+			{inputText && (
+				<div style={{ marginTop: '15px' }}>
+					<strong>Input:</strong>
+					<div style={{ marginTop: '10px', padding: '10px', backgroundColor: '#fff', border: '1px solid #ddd', borderRadius: '4px' }}>
+						<TextWithStructureViewer text={inputText} />
+					</div>
+				</div>
+			)}
+			{outputText && (
+				<div style={{ marginTop: '15px' }}>
+					<strong>Output:</strong>
+					<div style={{ marginTop: '10px', padding: '10px', backgroundColor: '#fff', border: '1px solid #ddd', borderRadius: '4px' }}>
+						<TextWithStructureViewer text={outputText} />
+					</div>
+				</div>
+			)}
+			{!inputText && !outputText && (
+				<div style={{ marginTop: '15px', color: '#666', fontStyle: 'italic' }}>
+					No input or output data available for this span.
 				</div>
 			)}
 		</div>

@@ -44,6 +44,7 @@ import SearchQuery from './common/SearchQuery.js';
 import Span from './common/types/Span.js';
 import Example from './common/types/Example.js';
 import { registerExperimentRoutes } from './routes/experiments.js';
+import { addTokenCost } from './token_cost.js';
 
 dotenv.config();
 
@@ -88,6 +89,10 @@ fastify.post('/span', { preHandler: authenticate }, async (request: Authenticate
     organisation,
   }));
   console.log("inserting: "+spansWithOrg.length+" spans");
+  // TODO rate limit check
+  // Add token cost
+  spansArray.forEach(span => addTokenCost(span));
+  // save
   await bulkInsertSpans(spansWithOrg);
   return { success: true, count: spansWithOrg.length };
 });

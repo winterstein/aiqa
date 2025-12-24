@@ -265,6 +265,10 @@ func wrapSyncFunction(fnValue reflect.Value, fnType reflect.Type, fnName string,
 		if len(results) > 0 {
 			output := prepareOutput(results, opt)
 			if output != nil {
+				// Extract and set token usage before setting output
+				extractAndSetTokenUsage(span, output)
+				// Extract and set provider/model before setting output
+				extractAndSetProviderAndModel(span, output)
 				span.SetAttributes(attribute.String("output", serializeValue(output)))
 			}
 			
@@ -316,6 +320,10 @@ func wrapAsyncFunction(fnValue reflect.Value, fnType reflect.Type, fnName string
 		if len(results) > 0 {
 			output := prepareOutput(results, opt)
 			if output != nil {
+				// Extract and set token usage before setting output
+				extractAndSetTokenUsage(span, output)
+				// Extract and set provider/model before setting output
+				extractAndSetProviderAndModel(span, output)
 				span.SetAttributes(attribute.String("output", serializeValue(output)))
 			}
 			
@@ -439,6 +447,271 @@ func SetSpanAttribute(ctx context.Context, attributeName string, attributeValue 
 	return false
 }
 
+// isAttributeSet checks if an attribute is already set on a span.
+// Returns true if the attribute exists, false otherwise.
+// Safe against exceptions.
+func isAttributeSet(span trace.Span, attributeName string) bool {
+	// OpenTelemetry Go SDK doesn't expose a direct way to check if an attribute is set.
+	// We'll use a conservative approach: try to access internal attributes if possible,
+	// otherwise assume not set to allow setting.
+	defer func() {
+		// Recover from any panics
+		if r := recover(); r != nil {
+			// If anything goes wrong, assume not set (conservative approach)
+		}
+	}()
+	
+	// Try to access span's internal attributes if available
+	// This is SDK-specific and may not work for all span implementations
+	if sdkSpan, ok := span.(interface{ Attributes() []attribute.KeyValue }); ok {
+		attrs := sdkSpan.Attributes()
+		for _, kv := range attrs {
+			if string(kv.Key) == attributeName {
+				return true
+			}
+		}
+	}
+	
+	return false
+}
+
+// extractAndSetTokenUsage extracts OpenAI API style token usage from result and adds to span attributes
+// using OpenTelemetry semantic conventions for gen_ai.
+// Only sets attributes that are not already set.
+//
+// This function detects token usage from OpenAI API response patterns:
+// - OpenAI Chat Completions API: The 'usage' object contains 'prompt_tokens', 'completion_tokens', and 'total_tokens'.
+//   See https://platform.openai.com/docs/api-reference/chat/object (usage field)
+// - OpenAI Completions API: The 'usage' object contains 'prompt_tokens', 'completion_tokens', and 'total_tokens'.
+//   See https://platform.openai.com/docs/api-reference/completions/object (usage field)
+//
+// This function is safe against exceptions and will not derail tracing or program execution.
+func extractAndSetTokenUsage(span trace.Span, result interface{}) {
+	defer func() {
+		// Catch any panics to ensure this never derails tracing
+		if r := recover(); r != nil {
+			// Silently ignore errors
+		}
+	}()
+	
+	if !span.IsRecording() {
+		return
+	}
+	
+	var usage map[string]interface{}
+	
+	// Check if result is a map with 'usage' key
+	if resultMap, ok := result.(map[string]interface{}); ok {
+		if usageVal, exists := resultMap["usage"]; exists {
+			if usageMap, ok := usageVal.(map[string]interface{}); ok {
+				usage = usageMap
+			}
+		} else {
+			// Check if result itself is a usage dict
+			if _, hasPrompt := resultMap["prompt_tokens"]; hasPrompt {
+				if _, hasCompletion := resultMap["completion_tokens"]; hasCompletion {
+					if _, hasTotal := resultMap["total_tokens"]; hasTotal {
+						usage = resultMap
+					}
+				}
+			}
+		}
+	}
+	
+	// Check if result has a 'Usage' field (struct with Usage field, e.g., OpenAI response object)
+	if usage == nil {
+		resultVal := reflect.ValueOf(result)
+		if resultVal.Kind() == reflect.Ptr {
+			resultVal = resultVal.Elem()
+		}
+		if resultVal.Kind() == reflect.Struct {
+			usageField := resultVal.FieldByName("Usage")
+			if !usageField.IsValid() {
+				usageField = resultVal.FieldByName("usage")
+			}
+			if usageField.IsValid() && usageField.CanInterface() {
+				if usageMap, ok := usageField.Interface().(map[string]interface{}); ok {
+					usage = usageMap
+				} else if usageField.Kind() == reflect.Struct {
+					// Convert struct to map
+					usage = make(map[string]interface{})
+					usageType := usageField.Type()
+					for i := 0; i < usageField.NumField(); i++ {
+						field := usageField.Field(i)
+						if field.CanInterface() {
+							fieldName := usageType.Field(i).Name
+							usage[fieldName] = field.Interface()
+						}
+					}
+				}
+			}
+		}
+	}
+	
+	// Extract token usage if found
+	if usage != nil {
+		// Get token values safely
+		var promptTokens, completionTokens, totalTokens interface{}
+		if val, ok := usage["prompt_tokens"]; ok {
+			promptTokens = val
+		} else if val, ok := usage["PromptTokens"]; ok {
+			promptTokens = val
+		}
+		
+		if val, ok := usage["completion_tokens"]; ok {
+			completionTokens = val
+		} else if val, ok := usage["CompletionTokens"]; ok {
+			completionTokens = val
+		}
+		
+		if val, ok := usage["total_tokens"]; ok {
+			totalTokens = val
+		} else if val, ok := usage["TotalTokens"]; ok {
+			totalTokens = val
+		}
+		
+		// Only set attributes that are not already set
+		if promptTokens != nil && !isAttributeSet(span, "gen_ai.usage.input_tokens") {
+			if tokens, ok := promptTokens.(int); ok {
+				span.SetAttributes(attribute.Int("gen_ai.usage.input_tokens", tokens))
+			} else if tokens, ok := promptTokens.(int64); ok {
+				span.SetAttributes(attribute.Int64("gen_ai.usage.input_tokens", tokens))
+			} else if tokens, ok := promptTokens.(float64); ok {
+				span.SetAttributes(attribute.Int("gen_ai.usage.input_tokens", int(tokens)))
+			}
+		}
+		
+		if completionTokens != nil && !isAttributeSet(span, "gen_ai.usage.output_tokens") {
+			if tokens, ok := completionTokens.(int); ok {
+				span.SetAttributes(attribute.Int("gen_ai.usage.output_tokens", tokens))
+			} else if tokens, ok := completionTokens.(int64); ok {
+				span.SetAttributes(attribute.Int64("gen_ai.usage.output_tokens", tokens))
+			} else if tokens, ok := completionTokens.(float64); ok {
+				span.SetAttributes(attribute.Int("gen_ai.usage.output_tokens", int(tokens)))
+			}
+		}
+		
+		if totalTokens != nil && !isAttributeSet(span, "gen_ai.usage.total_tokens") {
+			if tokens, ok := totalTokens.(int); ok {
+				span.SetAttributes(attribute.Int("gen_ai.usage.total_tokens", tokens))
+			} else if tokens, ok := totalTokens.(int64); ok {
+				span.SetAttributes(attribute.Int64("gen_ai.usage.total_tokens", tokens))
+			} else if tokens, ok := totalTokens.(float64); ok {
+				span.SetAttributes(attribute.Int("gen_ai.usage.total_tokens", int(tokens)))
+			}
+		}
+	}
+}
+
+// extractAndSetProviderAndModel extracts provider and model information from result and adds to span attributes
+// using OpenTelemetry semantic conventions for gen_ai.
+// Only sets attributes that are not already set.
+//
+// This function detects model information from common API response patterns:
+// - OpenAI Chat Completions API: The 'model' field is at the top level of the response.
+//   See https://platform.openai.com/docs/api-reference/chat/object
+// - OpenAI Completions API: The 'model' field is at the top level of the response.
+//   See https://platform.openai.com/docs/api-reference/completions/object
+//
+// This function is safe against exceptions and will not derail tracing or program execution.
+func extractAndSetProviderAndModel(span trace.Span, result interface{}) {
+	defer func() {
+		// Catch any panics to ensure this never derails tracing
+		if r := recover(); r != nil {
+			// Silently ignore errors
+		}
+	}()
+	
+	if !span.IsRecording() {
+		return
+	}
+	
+	var model, provider interface{}
+	
+	// Check if result is a map
+	if resultMap, ok := result.(map[string]interface{}); ok {
+		model = resultMap["model"]
+		if model == nil {
+			model = resultMap["Model"]
+		}
+		provider = resultMap["provider"]
+		if provider == nil {
+			provider = resultMap["Provider"]
+		}
+		if provider == nil {
+			provider = resultMap["provider_name"]
+		}
+		if provider == nil {
+			provider = resultMap["providerName"]
+		}
+		
+		// Check for model in choices (OpenAI pattern)
+		if model == nil {
+			if choices, ok := resultMap["choices"].([]interface{}); ok && len(choices) > 0 {
+				if firstChoice, ok := choices[0].(map[string]interface{}); ok {
+					model = firstChoice["model"]
+					if model == nil {
+						model = firstChoice["Model"]
+					}
+				}
+			}
+		}
+	}
+	
+	// Check if result has Model/Provider fields (struct, e.g., OpenAI response object)
+	if model == nil || provider == nil {
+		resultVal := reflect.ValueOf(result)
+		if resultVal.Kind() == reflect.Ptr {
+			resultVal = resultVal.Elem()
+		}
+		if resultVal.Kind() == reflect.Struct {
+			if model == nil {
+				modelField := resultVal.FieldByName("Model")
+				if !modelField.IsValid() {
+					modelField = resultVal.FieldByName("model")
+				}
+				if modelField.IsValid() && modelField.CanInterface() {
+					model = modelField.Interface()
+				}
+			}
+			if provider == nil {
+				providerField := resultVal.FieldByName("Provider")
+				if !providerField.IsValid() {
+					providerField = resultVal.FieldByName("provider")
+				}
+				if !providerField.IsValid() {
+					providerField = resultVal.FieldByName("ProviderName")
+				}
+				if !providerField.IsValid() {
+					providerField = resultVal.FieldByName("provider_name")
+				}
+				if providerField.IsValid() && providerField.CanInterface() {
+					provider = providerField.Interface()
+				}
+			}
+		}
+	}
+	
+	// Set attributes if found and not already set
+	if model != nil && !isAttributeSet(span, "gen_ai.request.model") {
+		if modelStr, ok := model.(string); ok && modelStr != "" {
+			span.SetAttributes(attribute.String("gen_ai.request.model", modelStr))
+		} else {
+			// Convert to string if needed
+			span.SetAttributes(attribute.String("gen_ai.request.model", fmt.Sprintf("%v", model)))
+		}
+	}
+	
+	if provider != nil && !isAttributeSet(span, "gen_ai.provider.name") {
+		if providerStr, ok := provider.(string); ok && providerStr != "" {
+			span.SetAttributes(attribute.String("gen_ai.provider.name", providerStr))
+		} else {
+			// Convert to string if needed
+			span.SetAttributes(attribute.String("gen_ai.provider.name", fmt.Sprintf("%v", provider)))
+		}
+	}
+}
+
 // setComponentTagIfSet sets the component tag on a span if it's configured
 func setComponentTagIfSet(span trace.Span) {
 	if componentTag != "" {
@@ -459,6 +732,77 @@ func GetActiveSpan(ctx context.Context) trace.Span {
 // Returns: True if gen_ai.conversation.id was set, False if no active span found
 func SetConversationId(ctx context.Context, conversationId string) bool {
 	return SetSpanAttribute(ctx, "gen_ai.conversation.id", conversationId)
+}
+
+// SetTokenUsage sets token usage attributes on the active span using OpenTelemetry semantic conventions for gen_ai.
+// This allows you to explicitly record token usage information.
+// See https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/ for more details.
+//
+// inputTokens: Number of input tokens used (maps to gen_ai.usage.input_tokens)
+// outputTokens: Number of output tokens generated (maps to gen_ai.usage.output_tokens)
+// totalTokens: Total number of tokens used (maps to gen_ai.usage.total_tokens)
+// Returns: True if at least one token usage attribute was set, False if no active span found
+func SetTokenUsage(ctx context.Context, inputTokens *int, outputTokens *int, totalTokens *int) bool {
+	span := trace.SpanFromContext(ctx)
+	if !span.IsRecording() {
+		return false
+	}
+	
+	setCount := 0
+	defer func() {
+		// Recover from any panics
+		if r := recover(); r != nil {
+			// Silently ignore errors
+		}
+	}()
+	
+	if inputTokens != nil {
+		span.SetAttributes(attribute.Int("gen_ai.usage.input_tokens", *inputTokens))
+		setCount++
+	}
+	if outputTokens != nil {
+		span.SetAttributes(attribute.Int("gen_ai.usage.output_tokens", *outputTokens))
+		setCount++
+	}
+	if totalTokens != nil {
+		span.SetAttributes(attribute.Int("gen_ai.usage.total_tokens", *totalTokens))
+		setCount++
+	}
+	
+	return setCount > 0
+}
+
+// SetProviderAndModel sets provider and model attributes on the active span using OpenTelemetry semantic conventions for gen_ai.
+// This allows you to explicitly record provider and model information.
+// See https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/ for more details.
+//
+// provider: Name of the AI provider (e.g., "openai", "anthropic", "google") (maps to gen_ai.provider.name)
+// model: Name of the model used (e.g., "gpt-4", "claude-3-5-sonnet") (maps to gen_ai.request.model)
+// Returns: True if at least one attribute was set, False if no active span found
+func SetProviderAndModel(ctx context.Context, provider *string, model *string) bool {
+	span := trace.SpanFromContext(ctx)
+	if !span.IsRecording() {
+		return false
+	}
+	
+	setCount := 0
+	defer func() {
+		// Recover from any panics
+		if r := recover(); r != nil {
+			// Silently ignore errors
+		}
+	}()
+	
+	if provider != nil && *provider != "" {
+		span.SetAttributes(attribute.String("gen_ai.provider.name", *provider))
+		setCount++
+	}
+	if model != nil && *model != "" {
+		span.SetAttributes(attribute.String("gen_ai.request.model", *model))
+		setCount++
+	}
+	
+	return setCount > 0
 }
 
 // SetComponentTag sets a custom component tag that will be added to all spans created by AIQA.

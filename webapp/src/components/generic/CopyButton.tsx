@@ -8,6 +8,7 @@ interface CopyButtonProps {
     showToast?: (message: string, type?: 'success' | 'error' | 'info' | 'warning') => void;
     successMessage?: string;
     errorMessage?: string;
+    logToConsole?: boolean;
 }
 
 /**
@@ -18,7 +19,8 @@ export default function CopyButton({
     className='btn btn-outline-secondary btn-sm',
     showToast,
     successMessage = 'Copied to clipboard!',
-    errorMessage = 'Failed to copy to clipboard'
+    errorMessage = 'Failed to copy to clipboard',
+	logToConsole = false
 }: CopyButtonProps) {
     const doCopy = async () => {
         try {
@@ -43,6 +45,9 @@ export default function CopyButton({
                 showToast(errorMessage, 'error');
             }
         }
+		if (logToConsole) {
+			console.log('Copied to clipboard:', content);
+		}
     };
    return <button className={className}
    onClick={doCopy} title='Copy to clipboard'><Copy size={16} /></button>;

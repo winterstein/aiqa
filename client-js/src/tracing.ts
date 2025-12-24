@@ -176,6 +176,10 @@ export function withTracingAsync(fn: Function, options: TracingOptions = {}) {
 			if (ignoreOutput && typeof output === 'object') {
 				// TODO make a copy of output removing fields in ignoreOutput
 			}
+			// Extract and set token usage before setting output
+			extractAndSetTokenUsage(span, output);
+			// Extract and set provider/model before setting output
+			extractAndSetProviderAndModel(span, output);
 			span.setAttribute('output', output);
 
 			return result;
@@ -243,6 +247,10 @@ export function withTracing(fn: Function, options: TracingOptions = {}) {
 			if (ignoreOutput && typeof output === 'object') {
 				// TODO make a copy of output removing fields in ignoreOutput
 			}
+			// Extract and set token usage before setting output
+			extractAndSetTokenUsage(span, output);
+			// Extract and set provider/model before setting output
+			extractAndSetProviderAndModel(span, output);
 			span.setAttribute('output', output);
 
 			return result;
@@ -271,6 +279,174 @@ export function setSpanAttribute(attributeName: string, attributeValue: any) {
 	return false; // no span found
 }
 
+/**
+ * Check if an attribute is already set on a span.
+ * Returns true if the attribute exists, false otherwise.
+ * Safe against exceptions.
+ */
+function isAttributeSet(span: any, attributeName: string): boolean {
+	try {
+		// Try to access span attributes if available
+		if (span.attributes) {
+			return attributeName in span.attributes;
+		}
+		// Fallback: check if span has a way to get attributes
+		// OpenTelemetry spans don't expose a direct getter, so we return false
+		// to allow setting (conservative approach)
+		return false;
+	} catch (e) {
+		// If anything goes wrong, assume not set (conservative approach)
+		return false;
+	}
+}
+
+/**
+ * Extract OpenAI API style token usage from result and add to span attributes
+ * using OpenTelemetry semantic conventions for gen_ai.
+ * Only sets attributes that are not already set.
+ * 
+ * This function detects token usage from OpenAI API response patterns:
+ * - OpenAI Chat Completions API: The 'usage' object contains 'prompt_tokens', 'completion_tokens', and 'total_tokens'.
+ *   See https://platform.openai.com/docs/api-reference/chat/object (usage field)
+ * - OpenAI Completions API: The 'usage' object contains 'prompt_tokens', 'completion_tokens', and 'total_tokens'.
+ *   See https://platform.openai.com/docs/api-reference/completions/object (usage field)
+ * 
+ * This function is safe against exceptions and will not derail tracing or program execution.
+ */
+function extractAndSetTokenUsage(span: any, result: any): void {
+	try {
+		if (!span || !span.isRecording || !span.isRecording()) {
+			return;
+		}
+		
+		let usage: any = null;
+		
+		// Check if result is an object with 'usage' key
+		try {
+			if (result && typeof result === 'object') {
+				if ('usage' in result) {
+					usage = result.usage;
+				} else if ('Usage' in result) {
+					usage = result.Usage;
+				} else {
+					// Check if result itself is a usage dict
+					if ('prompt_tokens' in result && 'completion_tokens' in result && 'total_tokens' in result) {
+						usage = result;
+					} else if ('PromptTokens' in result && 'CompletionTokens' in result && 'TotalTokens' in result) {
+						usage = result;
+					}
+				}
+			}
+		} catch (e) {
+			// If accessing result properties fails, just return silently
+			return;
+		}
+		
+		// Extract token usage if found
+		if (usage && typeof usage === 'object') {
+			try {
+				const promptTokens = usage.prompt_tokens ?? usage.PromptTokens;
+				const completionTokens = usage.completion_tokens ?? usage.CompletionTokens;
+				const totalTokens = usage.total_tokens ?? usage.TotalTokens;
+				
+				// Only set attributes that are not already set
+				if (promptTokens != null && !isAttributeSet(span, 'gen_ai.usage.input_tokens')) {
+					span.setAttribute('gen_ai.usage.input_tokens', Number(promptTokens));
+				}
+				if (completionTokens != null && !isAttributeSet(span, 'gen_ai.usage.output_tokens')) {
+					span.setAttribute('gen_ai.usage.output_tokens', Number(completionTokens));
+				}
+				if (totalTokens != null && !isAttributeSet(span, 'gen_ai.usage.total_tokens')) {
+					span.setAttribute('gen_ai.usage.total_tokens', Number(totalTokens));
+				}
+			} catch (e) {
+				// If setting attributes fails, log but don't raise
+				console.debug('Failed to set token usage attributes on span', e);
+			}
+		}
+	} catch (e) {
+		// Catch any other exceptions to ensure this never derails tracing
+		console.debug('Error in extractAndSetTokenUsage', e);
+	}
+}
+
+/**
+ * Extract provider and model information from result and add to span attributes
+ * using OpenTelemetry semantic conventions for gen_ai.
+ * Only sets attributes that are not already set.
+ * 
+ * This function detects model information from common API response patterns:
+ * - OpenAI Chat Completions API: The 'model' field is at the top level of the response.
+ *   See https://platform.openai.com/docs/api-reference/chat/object
+ * - OpenAI Completions API: The 'model' field is at the top level of the response.
+ *   See https://platform.openai.com/docs/api-reference/completions/object
+ * 
+ * This function is safe against exceptions and will not derail tracing or program execution.
+ */
+function extractAndSetProviderAndModel(span: any, result: any): void {
+	try {
+		if (!span || !span.isRecording || !span.isRecording()) {
+			return;
+		}
+		
+		let model: any = null;
+		let provider: any = null;
+		
+		// Check if result is an object
+		try {
+			if (result && typeof result === 'object') {
+				model = result.model ?? result.Model;
+				provider = result.provider ?? result.Provider ?? result.provider_name ?? result.providerName;
+				
+				// Check nested structures (e.g., response.data.model)
+				if (model == null && result.data) {
+					const data = result.data;
+					if (typeof data === 'object') {
+						model = data.model ?? data.Model;
+					}
+				}
+				
+				// Check for model in choices (OpenAI pattern)
+				if (model == null && Array.isArray(result.choices) && result.choices.length > 0) {
+					const firstChoice = result.choices[0];
+					if (firstChoice && typeof firstChoice === 'object') {
+						model = firstChoice.model ?? firstChoice.Model;
+					}
+				}
+			}
+		} catch (e) {
+			// If accessing result properties fails, just return silently
+			return;
+		}
+		
+		// Set attributes if found and not already set
+		if (model != null && !isAttributeSet(span, 'gen_ai.request.model')) {
+			try {
+				const modelStr = String(model);
+				if (modelStr) {
+					span.setAttribute('gen_ai.request.model', modelStr);
+				}
+			} catch (e) {
+				console.debug('Failed to set model attribute on span', e);
+			}
+		}
+		
+		if (provider != null && !isAttributeSet(span, 'gen_ai.provider.name')) {
+			try {
+				const providerStr = String(provider);
+				if (providerStr) {
+					span.setAttribute('gen_ai.provider.name', providerStr);
+				}
+			} catch (e) {
+				console.debug('Failed to set provider attribute on span', e);
+			}
+		}
+	} catch (e) {
+		// Catch any other exceptions to ensure this never derails tracing
+		console.debug('Error in extractAndSetProviderAndModel', e);
+	}
+}
+
 export function getActiveSpan() {
 	return trace.getActiveSpan();
 }
@@ -296,6 +472,112 @@ export function getActiveSpan() {
  */
 export function setConversationId(conversationId: string): boolean {
 	return setSpanAttribute('gen_ai.conversation.id', conversationId);
+}
+
+/**
+ * Set token usage attributes on the active span using OpenTelemetry semantic conventions for gen_ai.
+ * This allows you to explicitly record token usage information.
+ * See https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/ for more details.
+ * 
+ * @param inputTokens - Number of input tokens used (maps to gen_ai.usage.input_tokens)
+ * @param outputTokens - Number of output tokens generated (maps to gen_ai.usage.output_tokens)
+ * @param totalTokens - Total number of tokens used (maps to gen_ai.usage.total_tokens)
+ * @returns True if at least one token usage attribute was set, False if no active span found
+ * 
+ * @example
+ * ```typescript
+ * import { withTracing, setTokenUsage } from './src/tracing';
+ * 
+ * const tracedFn = withTracing(function callLLM(prompt: string) {
+ *   const response = await openaiClient.chat.completions.create(...);
+ *   // Explicitly set token usage
+ *   setTokenUsage(
+ *     response.usage.prompt_tokens,
+ *     response.usage.completion_tokens,
+ *     response.usage.total_tokens
+ *   );
+ *   return response;
+ * });
+ * ```
+ */
+export function setTokenUsage(
+	inputTokens?: number | null,
+	outputTokens?: number | null,
+	totalTokens?: number | null
+): boolean {
+	const span = trace.getActiveSpan();
+	if (!span) {
+		return false;
+	}
+	
+	let setCount = 0;
+	try {
+		if (inputTokens != null) {
+			span.setAttribute('gen_ai.usage.input_tokens', Number(inputTokens));
+			setCount++;
+		}
+		if (outputTokens != null) {
+			span.setAttribute('gen_ai.usage.output_tokens', Number(outputTokens));
+			setCount++;
+		}
+		if (totalTokens != null) {
+			span.setAttribute('gen_ai.usage.total_tokens', Number(totalTokens));
+			setCount++;
+		}
+	} catch (e) {
+		console.warn('Failed to set token usage attributes:', e);
+		return false;
+	}
+	
+	return setCount > 0;
+}
+
+/**
+ * Set provider and model attributes on the active span using OpenTelemetry semantic conventions for gen_ai.
+ * This allows you to explicitly record provider and model information.
+ * See https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/ for more details.
+ * 
+ * @param provider - Name of the AI provider (e.g., "openai", "anthropic", "google") (maps to gen_ai.provider.name)
+ * @param model - Name of the model used (e.g., "gpt-4", "claude-3-5-sonnet") (maps to gen_ai.request.model)
+ * @returns True if at least one attribute was set, False if no active span found
+ * 
+ * @example
+ * ```typescript
+ * import { withTracing, setProviderAndModel } from './src/tracing';
+ * 
+ * const tracedFn = withTracing(function callLLM(prompt: string) {
+ *   const response = await openaiClient.chat.completions.create(...);
+ *   // Explicitly set provider and model
+ *   setProviderAndModel("openai", response.model);
+ *   return response;
+ * });
+ * ```
+ */
+export function setProviderAndModel(
+	provider?: string | null,
+	model?: string | null
+): boolean {
+	const span = trace.getActiveSpan();
+	if (!span) {
+		return false;
+	}
+	
+	let setCount = 0;
+	try {
+		if (provider != null && provider !== '') {
+			span.setAttribute('gen_ai.provider.name', String(provider));
+			setCount++;
+		}
+		if (model != null && model !== '') {
+			span.setAttribute('gen_ai.request.model', String(model));
+			setCount++;
+		}
+	} catch (e) {
+		console.warn('Failed to set provider/model attributes:', e);
+		return false;
+	}
+	
+	return setCount > 0;
 }
 
 /**
