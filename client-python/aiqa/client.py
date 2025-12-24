@@ -59,7 +59,6 @@ def get_aiqa_client():
 
 def _init_tracing():
     """Initialize tracing system and load configuration from environment variables."""
-    
     # Initialize component tag from environment variable
     set_component_tag(os.getenv("AIQA_COMPONENT_TAG", None))
     
@@ -99,3 +98,13 @@ def _attach_aiqa_processor(provider: TracerProvider):
     provider.add_span_processor(BatchSpanProcessor(exporter))
     global client
     client["exporter"] = exporter
+
+
+def get_aiqa_tracer():
+    """
+    Get the AIQA tracer with version from __init__.py __version__.
+    This should be used instead of trace.get_tracer() to ensure version is set.
+    """
+    # Import here to avoid circular import
+    from . import __version__
+    return trace.get_tracer(AIQA_TRACER_NAME, version=__version__)

@@ -3,11 +3,7 @@
 # Bump this version when you make a change to the codebase
 VERSION="0.0.3"
 
-# This should be auto-run
-# How to set this in git hooks:
-# The post?? pre-commit hook should simply run: ./set-version-json.sh
-# The script will automatically stage the modified version.json files if run in a git repository.
-
+# Ideally this should be auto-run (fiddly with git hooks)
 
 # Why have a version.json?
 # Allows devs to check what version of code is running on a particular server
@@ -30,7 +26,7 @@ echo "{
 }" > $VERSION_INFO_FILE
 
 # Copy out to dirs
-FILES=(client-go/version.json client-python/version.json client-js/version.json server/.well-known/version.json webapp/.well-known/version.json)
+FILES=(client-go/version.json client-js/version.json server/version.json webapp/.well-known/version.json)
 
 for FILE in ${FILES[@]}; do
     DIR=$(dirname "$FILE")
@@ -41,13 +37,25 @@ for FILE in ${FILES[@]}; do
     cp $VERSION_INFO_FILE $FILE
 done
 
+# Update Python __init__.py __version__
+PYTHON_INIT_FILE="client-python/aiqa/__init__.py"
+if [ -f "$PYTHON_INIT_FILE" ]; then
+    echo "Updating $PYTHON_INIT_FILE __version__"
+    # Use sed to update __version__ line, preserving the rest of the file
+    sed -i "s/^__version__ = \".*\"/__version__ = \"$VERSION\"/" "$PYTHON_INIT_FILE"
+    echo "Updated __version__ to $VERSION in $PYTHON_INIT_FILE"
+else
+    echo "Warning: $PYTHON_INIT_FILE not found, skipping __version__ update"
+fi
+
+echo "Version info:"
 echo `cat $VERSION_INFO_FILE`
 
-# Stage the modified version.json files if we're in a git repository
-if git rev-parse --git-dir > /dev/null 2>&1; then
-    echo "Staging version.json files..."
-    git add version.json
-    git add client-go/version.json client-python/version.json client-js/version.json
-    git add server/.well-known/version.json webapp/.well-known/version.json 2>/dev/null || true
-    echo "Version files staged successfully"
-fi
+# # Stage the modified version.json files if we're in a git repository
+# if git rev-parse --git-dir > /dev/null 2>&1; then
+#     echo "Staging version.json files..."
+#     git add version.json
+#     git add client-go/version.json client-python/version.json client-js/version.json
+#     git add server/.well-known/version.json webapp/.well-known/version.json 2>/dev/null || true
+#     echo "Version files staged successfully"
+# fi

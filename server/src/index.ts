@@ -1,6 +1,11 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import dotenv from 'dotenv';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
 import { initPool, createTables, closePool } from './db/db_sql.js';
 import { initClient, createIndices, closeClient } from './db/db_es.js';
 import {

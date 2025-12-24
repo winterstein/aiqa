@@ -6,6 +6,8 @@ import { createExampleFromSpans, listDatasets, searchSpans } from '../api';
 import { Span } from '../common/types';
 import { getSpanId, getStartTime, getEndTime, getDurationMs } from '../utils/span-utils';
 import TextWithStructureViewer from '../components/generic/TextWithStructureViewer';
+import CopyButton from '../components/generic/CopyButton';
+import { useToast } from '../utils/toast';
 
 interface SpanTree {
 	span: Span;
@@ -110,11 +112,38 @@ const TraceDetailsPage: React.FC = () => {
             </>
           )}
           {spanTree && <SpanTreeViewer spanTree={spanTree} addToDataSet={addToDataSet} />}
+          <FullJson json={traceSpans} />
         </Col>
       </Row>
     </Container>
   );
 };
+
+function FullJson({ json }: { json: any }) {
+	if (!json) return null;
+	const jsonString = JSON.stringify(json, null, 2);
+	const {showToast} = useToast();
+	return (
+		<div style={{ marginTop: '30px', padding: '15px', border: '1px solid #ddd', borderRadius: '4px', backgroundColor: '#f9f9f9' }}>
+		  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+			<strong>Full trace JSON</strong>
+			<CopyButton content={jsonString} showToast={showToast} />
+		  </div>
+		  <pre style={{ 
+			fontSize: '11px', 
+			maxHeight: '150px', 
+			overflow: 'auto', 
+			margin: 0,
+			padding: '10px',
+			backgroundColor: '#fff',
+			border: '1px solid #ddd',
+			borderRadius: '3px'
+		  }}>
+			<code>{jsonString}</code>
+		  </pre>
+		</div>
+	  )
+}
 
 function SpanTreeViewer({ spanTree, addToDataSet }: { spanTree: SpanTree, addToDataSet: (spanTree: SpanTree) => Promise<void> }) {
 	const [expanded, setExpanded] = useState(true);

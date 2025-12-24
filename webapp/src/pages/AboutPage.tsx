@@ -1,8 +1,20 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Container, Row, Col, Card, CardBody, CardHeader } from 'reactstrap';
+import { useQuery } from '@tanstack/react-query';
 import Logo from '../components/Logo';
+import { getVersion } from '../api';
 
 const AboutPage: React.FC = () => {
+  const { data: versionInfo, isLoading: isLoadingVersion, error: versionError } = useQuery({
+    queryKey: ['version'],
+    queryFn: getVersion,
+    retry: 1,
+  });
+
+  useEffect(() => {
+    console.log('[AboutPage] Query state:', { isLoadingVersion, versionError, versionInfo });
+  }, [isLoadingVersion, versionError, versionInfo]);
+
   return (
     <Container className="mt-4">
       <Row>
@@ -38,6 +50,31 @@ const AboutPage: React.FC = () => {
                 Start by creating a dataset, then run experiments to evaluate your AI models.
                 Use the metrics dashboard to track performance and identify areas for improvement.
               </p>
+              {versionError && (
+                <div className="mt-4 pt-3 border-top">
+                  <small className="text-muted">Version information unavailable: {versionError.message}</small>
+                </div>
+              )}
+              {isLoadingVersion && (
+                <div className="mt-4 pt-3 border-top">
+                  <small className="text-muted">Loading version information...</small>
+                </div>
+              )}
+              {versionInfo && (
+                <div className="mt-4 pt-3 border-top">
+                  <h6>Version Information</h6>
+                  <dl className="row mb-0">
+                    <dt className="col-sm-3">Version:</dt>
+                    <dd className="col-sm-9">{versionInfo.VERSION}</dd>
+                    <dt className="col-sm-3">Git Commit:</dt>
+                    <dd className="col-sm-9">
+                      <code className="small">{versionInfo.GIT_COMMIT?.substring(0, 7)}</code>
+                    </dd>
+                    <dt className="col-sm-3">Build Date:</dt>
+                    <dd className="col-sm-9">{new Date(versionInfo.DATE).toLocaleString()}</dd>
+                  </dl>
+                </div>
+              )}
             </CardBody>
           </Card>
         </Col>

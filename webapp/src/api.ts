@@ -299,3 +299,18 @@ export async function deleteApiKey(id: string) {
 	});
 }
 
+// Version endpoint (public, no auth required)
+export async function getVersion() {
+	// Use regular fetch since version endpoint doesn't require auth
+	const url = `${API_BASE_URL}/version`;
+	console.log('[getVersion] Fetching from:', url);
+	const response = await fetch(url);
+	if (!response.ok) {
+		console.error('[getVersion] Error:', response.status, response.statusText);
+		throw new Error(`HTTP error! status: ${response.status}`);
+	}
+	const data = await response.json();
+	console.log('[getVersion] Received:', data);
+	return data;
+}
+

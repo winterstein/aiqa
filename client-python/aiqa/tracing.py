@@ -14,7 +14,7 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.trace import Status, StatusCode, SpanContext, TraceFlags
 from opentelemetry.propagate import inject, extract
 from .aiqa_exporter import AIQASpanExporter
-from .client import get_aiqa_client, AIQA_TRACER_NAME, get_component_tag, set_component_tag as _set_component_tag
+from .client import get_aiqa_client, AIQA_TRACER_NAME, get_component_tag, set_component_tag as _set_component_tag, get_aiqa_tracer
 
 logger = logging.getLogger(__name__)
 
@@ -407,7 +407,7 @@ def WithTracing(
         is_generator = inspect.isgeneratorfunction(fn)
         is_async_generator = inspect.isasyncgenfunction(fn) if hasattr(inspect, 'isasyncgenfunction') else False
         
-        tracer = trace.get_tracer(AIQA_TRACER_NAME)
+        tracer = get_aiqa_tracer()
         
         def _setup_span(span: trace.Span, input_data: Any) -> bool:
             """Setup span with input data. Returns True if span is recording."""
@@ -750,7 +750,7 @@ def create_span_from_trace_id(
         parent_context = set_span_in_context(trace.NonRecordingSpan(parent_span_context))
         
         # Start a new span in this context (it will be a child of the parent span)
-        tracer = trace.get_tracer(AIQA_TRACER_NAME)
+        tracer = get_aiqa_tracer()
         span = tracer.start_span(span_name, context=parent_context)
         
         # Set component tag if configured
@@ -762,7 +762,7 @@ def create_span_from_trace_id(
     except (ValueError, AttributeError) as e:
         logger.error(f"Error creating span from trace_id: {e}", exc_info=True)
         # Fallback: create a new span
-        tracer = trace.get_tracer(AIQA_TRACER_NAME)
+        tracer = get_aiqa_tracer()
         span = tracer.start_span(span_name)
         component_tag = get_component_tag()
         if component_tag:
@@ -814,7 +814,7 @@ def extract_trace_context(carrier: dict) -> Any:
             pass
         
         # Or create a span with the context
-        tracer = trace.get_tracer(AIQA_TRACER_NAME)
+        tracer = get_aiqa_tracer()
         with tracer.start_as_current_span("operation", context=ctx):
             # Your code here
             pass
