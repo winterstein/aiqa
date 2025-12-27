@@ -188,17 +188,16 @@ export function addTokenCost(span: Span): void {
 	}
 	
 	// Get provider and model from span attributes
+	// attributes are from: https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/
 	let provider = attributes['gen_ai.provider.name'] as string | undefined;
 	const model = attributes['gen_ai.request.model'] as string | undefined || 
 	              attributes['gen_ai.model.name'] as string | undefined;
+	const mode = attributes['gen_ai.request.mode'] as string | undefined || "standard"; // non-standard attribute. Default to standard if not set.
 	
 	// If no provider, try to infer from model name
 	if (!provider && model) {
 		provider = inferProviderFromModel(model) || null;
 	}
-	
-	// Default mode is 'standard'
-	const mode = 'standard';
 	
 	// Get cost entry
 	const costEntry = getTokenCostEntry(provider || null, model, mode);

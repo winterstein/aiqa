@@ -132,7 +132,7 @@ export async function scoreAllMetrics(
 			    errorMsg.includes('Unknown metric type')) {
 				// These are expected - skip silently or log at debug level
 			} else {
-				console.warn(`Failed to score metric "${metric.name}": ${errorMsg}`);
+				console.warn(`AIQA: Failed to score metric "${metric.name}": ${errorMsg}`);
 			}
 			// Skip metrics that fail to score
 		}

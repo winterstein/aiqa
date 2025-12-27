@@ -115,7 +115,7 @@ export async function getClient(): Promise<PoolClient> {
 }
 
 export async function doQuery<T extends QueryResultRow = any>(text: string, params?: any[]): Promise<QueryResult<T>> {
-	console.log('doQuery', text, params);
+	// console.log('doQuery', text, params);
 	if (!pool) {
 		throw new Error('Database pool not initialized. Call initPool() first.');
 	}

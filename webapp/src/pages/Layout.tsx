@@ -1,13 +1,20 @@
 import React from 'react';
 import { Container, Row, Col } from 'reactstrap';
+import { useParams } from 'react-router-dom';
 import TopNav from './TopNav';
 import LeftNav from './LeftNav';
+import CelebrationModal from '../components/CelebrationModal';
+import { useStepCompletionModal } from '../hooks/useStepCompletionModal';
+import '../utils/animations.css';
 
 interface LayoutProps {
   children: React.ReactNode;
 }
 
 const Layout: React.FC<LayoutProps> = ({ children }) => {
+  const { organisationId } = useParams<{ organisationId: string }>();
+  const modalProps = useStepCompletionModal(organisationId);
+
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <TopNav />
@@ -16,9 +23,12 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           <LeftNav />
         </Col>
         <Col className="p-4">
-          {children}
+          <div className="page-enter">
+            {children}
+          </div>
         </Col>
       </Row>
+      <CelebrationModal {...modalProps} />
     </div>
   );
 };

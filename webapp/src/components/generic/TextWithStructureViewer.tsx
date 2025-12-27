@@ -139,15 +139,15 @@ export function extractBlocks(text: string): Block[] {
  * TODO show (with expand/collapse bits) text that may have
  * xml tags or json blobs in it.
  */
-export default function TextWithStructureViewer({text}) {
+export default function TextWithStructureViewer({text, depth = 2}: {text: string, depth?: number}) {
 	const blocks = extractBlocks(text);
 	// render
-	return <div>
+	return <div style={{ maxWidth: '100%', minWidth: 0, overflowX: 'auto' }}>
 		{blocks.map((block) => {
-			return <div key={block.id}>
-				{block.type === 'text' && <TextViewer text={block.text!} />}
-				{block.type === 'xml' && <XmlObjectViewer xml={block.xml!} textComponent={TextWithStructureViewer} />}
-				{block.type === 'json' && <JsonObjectViewer json={block.json} textComponent={TextWithStructureViewer} />}
+			return <div key={block.id} style={{ maxWidth: '100%', minWidth: 0 }}>
+				{block.type === 'text' && <TextViewer text={block.text!} depth={depth} />}
+				{block.type === 'xml' && <XmlObjectViewer xml={block.xml!} textComponent={TextWithStructureViewer} depth={depth} />}
+				{block.type === 'json' && <JsonObjectViewer json={block.json} textComponent={TextWithStructureViewer} depth={depth} />}
 			</div>
 		})}
 	</div>
@@ -160,23 +160,26 @@ function format(text: string) {
 /**
  * Show potentially big text
  */
-function TextViewer({ text }: { text: string }) {
-	const [expanded, setExpanded] = useState(false);
+function TextViewer({ text, depth = 2 }: { text: string, depth?: number }) {
+	const [localDepth, setLocalDepth] = useState<number | null>(null);
+	const effectiveDepth = localDepth !== null ? localDepth : depth;
+	const expanded = effectiveDepth > 0;
+	
 	if (text.length > 1000) {
 		return (
-			<div>
+			<div style={{ maxWidth: '100%', minWidth: 0 }}>
 				<div className="d-flex align-items-center mb-1">
-					<ExpandCollapseControl hasChildren={true} isExpanded={expanded} onToggle={() => setExpanded(!expanded)} />
+					<ExpandCollapseControl hasChildren={true} isExpanded={expanded} onToggle={() => setLocalDepth(expanded ? 0 : 1)} />
 					<span className="text-muted fst-italic me-2">Text ({text.length} characters)</span>
 					<span className="ms-2"><CopyButton content={text} logToConsole /></span>
 				</div>
 				{expanded ? (
-					<div dangerouslySetInnerHTML={{ __html: format(text) }} />
+					<div dangerouslySetInnerHTML={{ __html: format(text) }} style={{ wordBreak: 'break-all', overflowWrap: 'anywhere', maxWidth: '100%', minWidth: 0 }} />
 				) : (
-					<div dangerouslySetInnerHTML={{ __html: format(text.slice(0, 1000)) + '...' }} />
+					<div dangerouslySetInnerHTML={{ __html: format(text.slice(0, 1000)) + '...' }} style={{ wordBreak: 'break-all', overflowWrap: 'anywhere', maxWidth: '100%', minWidth: 0 }} />
 				)}
 			</div>
 		);
 	}
-	return <div dangerouslySetInnerHTML={{ __html: format(text) }} />
+	return <div dangerouslySetInnerHTML={{ __html: format(text) }} style={{ wordBreak: 'break-all', overflowWrap: 'anywhere', maxWidth: '100%', minWidth: 0 }} />
 }

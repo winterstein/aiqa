@@ -9,9 +9,11 @@ import React, { useState } from 'react';
 import CopyButton from './CopyButton';
 import ExpandCollapseControl from './ExpandCollapseControl';
 
-export default function JsonObjectViewer({ json, textComponent }: { json: any, textComponent?: React.ComponentType<{ text: string }> }) {
+export default function JsonObjectViewer({ json, textComponent, depth = 2 }: { json: any, textComponent?: React.ComponentType<{ text: string, depth?: number }>, depth?: number }) {
 	const $copyButton = <CopyButton content={json} />
-	const [expanded, setExpanded] = useState(true);
+	const [localDepth, setLocalDepth] = useState<number | null>(null);
+	const effectiveDepth = localDepth !== null ? localDepth : depth;
+	const expanded = effectiveDepth > 0;
 	const [arrayFullyExpanded, setArrayFullyExpanded] = useState(false);
 	
 	if (Array.isArray(json)) {
@@ -20,9 +22,9 @@ export default function JsonObjectViewer({ json, textComponent }: { json: any, t
 		
 		if (!expanded) {
 			return (
-				<div className="border rounded p-2 my-2" style={{ borderColor: '#e0e0e0' }}>
+				<div className="border rounded p-2 my-2" style={{ borderColor: '#e0e0e0', maxWidth: '100%', minWidth: 0, overflowX: 'auto' }}>
 					<div className="d-flex align-items-center mb-1">
-						<ExpandCollapseControl hasChildren={true} isExpanded={false} onToggle={() => setExpanded(true)} />
+						<ExpandCollapseControl hasChildren={true} isExpanded={false} onToggle={() => setLocalDepth(1)} />
 						<span className="text-muted fst-italic me-2">Array ({json.length} items)</span>
 						{json.length > 0 && <span className="ms-2">{$copyButton}</span>}
 					</div>
@@ -31,15 +33,15 @@ export default function JsonObjectViewer({ json, textComponent }: { json: any, t
 		}
 		
 		return (
-			<div className="border rounded p-2 my-2" style={{ borderColor: '#e0e0e0' }}>
+			<div className="border rounded p-2 my-2" style={{ borderColor: '#e0e0e0', maxWidth: '100%', minWidth: 0, overflowX: 'auto' }}>
 				<div className="d-flex align-items-center mb-1">
-					<ExpandCollapseControl hasChildren={true} isExpanded={true} onToggle={() => setExpanded(false)} />
+					<ExpandCollapseControl hasChildren={true} isExpanded={true} onToggle={() => setLocalDepth(0)} />
 					<span className="text-muted fst-italic me-2">Array ({json.length} items)</span>
 					{json.length > 0 && <span className="ms-2">{$copyButton}</span>}
 				</div>
 				{json.slice(0, itemsToShow).map((item, index) => (
-					<div key={index} className="my-2 ps-2" style={{ borderLeft: '2px solid #e0e0e0' }}>
-						<JsonObjectViewer json={item} textComponent={textComponent} />
+					<div key={index} className="my-2 ps-2" style={{ borderLeft: '2px solid #e0e0e0', maxWidth: '100%', minWidth: 0 }}>
+						<JsonObjectViewer json={item} textComponent={textComponent} depth={effectiveDepth - 1} />
 					</div>
 				))}
 				{hasMore && !arrayFullyExpanded && (
@@ -69,9 +71,9 @@ export default function JsonObjectViewer({ json, textComponent }: { json: any, t
 		
 		if (!expanded) {
 			return (
-				<div className="border rounded p-2 my-2" style={{ borderColor: '#e0e0e0' }}>
+				<div className="border rounded p-2 my-2" style={{ borderColor: '#e0e0e0', maxWidth: '100%', minWidth: 0, overflowX: 'auto' }}>
 					<div className="d-flex align-items-center mb-1">
-						<ExpandCollapseControl hasChildren={true} isExpanded={false} onToggle={() => setExpanded(true)} />
+						<ExpandCollapseControl hasChildren={true} isExpanded={false} onToggle={() => setLocalDepth(1)} />
 						<span className="text-muted fst-italic me-2">Object ({keyCount} keys)</span>
 						{hasKeys && <span className="ms-2">{$copyButton}</span>}
 					</div>
@@ -80,9 +82,9 @@ export default function JsonObjectViewer({ json, textComponent }: { json: any, t
 		}
 		
 		return (
-			<div className="border rounded p-2 my-2" style={{ borderColor: '#e0e0e0' }}>
+			<div className="border rounded p-2 my-2" style={{ borderColor: '#e0e0e0', maxWidth: '100%', minWidth: 0, overflowX: 'auto' }}>
 				<div className="d-flex align-items-center mb-1">
-					<ExpandCollapseControl hasChildren={true} isExpanded={true} onToggle={() => setExpanded(false)} />
+					<ExpandCollapseControl hasChildren={true} isExpanded={true} onToggle={() => setLocalDepth(0)} />
 					<span className="text-muted fst-italic me-2">Object ({keyCount} keys)</span>
 					{hasKeys && <span className="ms-2">{$copyButton}</span>}
 				</div>
@@ -98,7 +100,7 @@ export default function JsonObjectViewer({ json, textComponent }: { json: any, t
 					if (isShortPrimitive) {
 						// Show key: value on the same line
 						return (
-							<div key={key} className="my-1">
+							<div key={key} className="my-1" style={{ wordBreak: 'break-all', overflowWrap: 'anywhere', maxWidth: '100%', minWidth: 0 }}>
 								<span className="fw-bold me-2" style={{ color: '#555' }}>{key}:</span>
 								<span>{value}</span>
 							</div>
@@ -107,9 +109,9 @@ export default function JsonObjectViewer({ json, textComponent }: { json: any, t
 					
 					// For complex values, show on separate line
 					return (
-						<div key={key} className="my-2">
+						<div key={key} className="my-2" style={{ maxWidth: '100%', minWidth: 0 }}>
 							<span className="fw-bold me-2" style={{ color: '#555' }}>{key}:</span>
-							<JsonObjectViewer json={value} textComponent={textComponent} />
+							<JsonObjectViewer json={value} textComponent={textComponent} depth={effectiveDepth - 1} />
 						</div>
 					);
 
@@ -122,7 +124,7 @@ export default function JsonObjectViewer({ json, textComponent }: { json: any, t
 	}
 	if (typeof json === 'string' && textComponent) {
 		const TextComponent = textComponent;
-		return <TextComponent text={json} />;
+		return <TextComponent text={json} depth={effectiveDepth - 1} />;
 	}
 	return <span className="text-muted">{""+json}</span>;
 }

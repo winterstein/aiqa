@@ -1,0 +1,68 @@
+name: Deploy Server
+
+on:
+  push:
+    paths:
+      - 'server/**'
+      - '.github/workflows/server-deploy.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Install dependencies
+        working-directory: ./server
+        run: pnpm install --frozen-lockfile
+
+      - name: Build server
+        working-directory: ./server
+        run: pnpm run build
+
+      - name: Deploy to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          source: "server/dist,server/package.json,server/pnpm-lock.yaml"
+          target: "/opt/aiqa/server"
+          strip_components: 1
+
+      - name: Install dependencies on remote server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          script: |
+            cd /opt/aiqa/server
+            if [ ! -f .env ]; then
+              echo "Warning: .env file not found. Please create it manually with your configuration."
+            fi
+            # Ensure pnpm is available
+            if ! command -v pnpm &> /dev/null; then
+              echo "pnpm not found, installing..."
+              npm install -g pnpm
+            fi
+            pnpm install --prod --frozen-lockfile
+            sudo chown -R www-data:www-data /opt/aiqa/server
+            sudo systemctl restart aiqa-server
+            sudo systemctl status aiqa-server
+

@@ -37,6 +37,7 @@ export interface TableUsingAPIProps<T> {
   pageSize?: number;
   enableInMemoryFiltering?: boolean;
   initialSorting?: SortingState;
+  refetchInterval?: number;
   onRowClick?: (row: T) => void;
 }
 
@@ -49,6 +50,7 @@ function TableUsingAPI<T extends Record<string, any>>({
   pageSize = 50,
   enableInMemoryFiltering = true,
   initialSorting = [],
+  refetchInterval,
   onRowClick,
 }: TableUsingAPIProps<T>) {
   const [sorting, setSorting] = useState<SortingState>(initialSorting);
@@ -65,6 +67,7 @@ function TableUsingAPI<T extends Record<string, any>>({
   const { data: loadedData, isLoading, error: loadError } = useQuery({
     queryKey: ['table-data', serverQuery],
     queryFn: () => loadData(serverQuery),
+	refetchInterval,
   });
   const hits = loadedData?.hits || [];
   const total = loadedData?.total || 0;

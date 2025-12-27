@@ -66,3 +66,150 @@ export const getDurationMs = (span: Span): number | null => {
     if ( ! start || ! end) return null;
     return end.getTime() - start.getTime();
   };
+
+export const getTraceId = (span: Span): string => {
+  return (span as any).client_trace_id || (span as any).traceId || (span as any).spanContext?.()?.traceId || '';
+};
+
+export const getTotalTokenCount = (span: Span): number | null => {
+  const attributes = (span as any).attributes || {};
+  const totalTokens = attributes['gen_ai.usage.total_tokens'] as number | undefined;
+  if (totalTokens !== undefined) {
+    return totalTokens;
+  }
+  // Calculate from input + output if total not available
+  const inputTokens = attributes['gen_ai.usage.input_tokens'] as number | undefined;
+  const outputTokens = attributes['gen_ai.usage.output_tokens'] as number | undefined;
+  if (inputTokens !== undefined || outputTokens !== undefined) {
+    return (inputTokens || 0) + (outputTokens || 0);
+  }
+  return null;
+};
+
+export const getCost = (span: Span): number | null => {
+  const attributes = (span as any).attributes || {};
+  const cost = attributes['gen_ai.cost.usd'] as number | undefined;
+  return cost !== undefined ? cost : null;
+};
+
+export const isRootSpan = (span: Span): boolean => {
+  const parentSpanId = (span as any).parentSpanId || (span as any).span?.parent?.id || null;
+  return parentSpanId === null;
+};
+
+export const getParentSpanId = (span: Span): string | null => {
+  return (span as any).parentSpanId || (span as any).span?.parent?.id || null;
+};
+
+interface SpanTree {
+  span: Span;
+  children: SpanTree[];
+}
+
+/**
+ * Organize spans into trees by trace-id.
+ * Returns a map of trace-id to the root span tree(s) for that trace.
+ */
+export function organizeSpansByTraceId(spans: Span[]): Map<string, SpanTree[]> {
+  const traceMap = new Map<string, Span[]>();
+  
+  // Group spans by trace-id
+  spans.forEach(span => {
+    const traceId = getTraceId(span);
+    if (traceId) {
+      if (!traceMap.has(traceId)) {
+        traceMap.set(traceId, []);
+      }
+      traceMap.get(traceId)!.push(span);
+    }
+  });
+
+  const result = new Map<string, SpanTree[]>();
+
+  // For each trace, organize spans into tree(s)
+  traceMap.forEach((traceSpans, traceId) => {
+    const roots = traceSpans.filter(span => isRootSpan(span));
+    const trees = roots.map(root => organizeSpansIntoTree(traceSpans, root));
+    result.set(traceId, trees.filter((t): t is SpanTree => t !== null));
+  });
+
+  return result;
+}
+
+function getAllPossibleSpanIds(span: Span): Set<string> {
+  const ids = new Set<string>();
+  const possibleIds = [
+    (span as any).clientSpanId,
+    (span as any).spanId,
+    (span as any).span?.id,
+    (span as any).client_span_id,
+  ];
+  possibleIds.forEach(id => {
+    if (id && id !== 'N/A') {
+      ids.add(String(id));
+    }
+  });
+  const spanId = getSpanId(span);
+  if (spanId && spanId !== 'N/A') {
+    ids.add(spanId);
+  }
+  return ids;
+}
+
+function organizeSpansIntoTree(spans: Span[], parent: Span): SpanTree | null {
+  const parentIds = getAllPossibleSpanIds(parent);
+  const childSpans = spans.filter(span => {
+    const spanParentId = getParentSpanId(span);
+    if (!spanParentId) return false;
+    return parentIds.has(spanParentId);
+  });
+
+  return {
+    span: parent,
+    children: childSpans.map(childSpan => organizeSpansIntoTree(spans, childSpan)).filter((child): child is SpanTree => child !== null),
+  };
+}
+
+/**
+ * Calculate tokens for a span tree without double-counting.
+ * Recurses down the tree, but stops recursing when it finds token info at a node.
+ * Sums across branches in the tree.
+ */
+export function calculateTokensForTree(tree: SpanTree): number {
+  const tokens = getTotalTokenCount(tree.span);
+  
+  // If this span has token info, use it and don't recurse into children
+  // (to avoid double-counting)
+  if (tokens !== null) {
+    return tokens;
+  }
+
+  // Otherwise, sum tokens from all children branches
+  let total = 0;
+  for (const child of tree.children) {
+    total += calculateTokensForTree(child);
+  }
+  return total;
+}
+
+/**
+ * Calculate cost for a span tree without double-counting.
+ * Recurses down the tree, but stops recursing when it finds cost info at a node.
+ * Sums across branches in the tree.
+ */
+export function calculateCostForTree(tree: SpanTree): number {
+  const cost = getCost(tree.span);
+  
+  // If this span has cost info, use it and don't recurse into children
+  // (to avoid double-counting)
+  if (cost !== null) {
+    return cost;
+  }
+
+  // Otherwise, sum cost from all children branches
+  let total = 0;
+  for (const child of tree.children) {
+    total += calculateCostForTree(child);
+  }
+  return total;
+}

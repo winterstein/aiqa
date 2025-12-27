@@ -25,7 +25,7 @@ export function searchQueryToEsQuery(sq: SearchQuery | string | null | undefined
 /**
  * Process a single bit/item into an Elasticsearch query
  */
-function buildESQuery2_oneBit(bit: any): any {
+function buildEsQuery_oneBit(bit: any): any {
   if (typeof bit === 'string') {
     return { match: { _all: bit } };
   }
@@ -59,19 +59,53 @@ export function buildEsQuery(tree: any[]): any {
   }
 
   if (tree.length === 1) {
-    return buildESQuery2_oneBit(tree[0]);
+    return buildEsQuery_oneBit(tree[0]);
   }
 
   const op = tree[0];
   const bits = tree.slice(1);
-
-  const queries = bits.map((bit: any) => buildESQuery2_oneBit(bit));
+  const queries = bits.map((bit: any) => buildEsQuery_oneBit(bit));
 
   if (op === 'OR') {
     return { bool: { should: queries, minimum_should_match: 1 } };
   } else {
     return { bool: { must: queries } };
   }
+}
+
+/**
+ * Build filter clauses from a filters object.
+ */
+function buildFilterClauses(filters?: Record<string, string>): any[] {
+  if (!filters) return [];
+  return Object.entries(filters)
+    .filter(([_, value]) => value !== undefined && value !== null)
+    .map(([key, value]) => ({ term: { [key]: value } }));
+}
+
+/**
+ * Get sort field based on index name (examples use 'created', spans use '@timestamp').
+ */
+function getSortField(indexName: string): string {
+  return indexName.includes('examples') ? 'created' : '@timestamp';
+}
+
+/**
+ * Merge unindexed_attributes back into attributes for search results.
+ */
+function mergeUnindexedAttributes(hit: any): any {
+  if (!hit.unindexed_attributes) return hit;
+  return {
+    ...hit,
+    attributes: { ...hit.attributes, ...hit.unindexed_attributes }
+  };
+}
+
+/**
+ * Extract total count from Elasticsearch response (handles both formats).
+ */
+function extractTotal(total: number | { value: number }): number {
+  return typeof total === 'number' ? total : total.value;
 }
 
 /**
@@ -85,48 +119,39 @@ export async function searchEntities<T>(
   limit: number = 100,
   offset: number = 0
 ): Promise<{ hits: T[]; total: number }> {
+  if (!client) {
+    throw new Error('Elasticsearch client not initialized.');
+  }
+
   const baseQuery = searchQueryToEsQuery(searchQuery);
-  console.log("baseQuery", baseQuery);
-  const esQuery: any = {
-    bool: {
-      must: []
-    }
-  };
+  const mustClauses: any[] = [];
 
   // Add the search query if it's not match_all
   if (!baseQuery.match_all) {
-    esQuery.bool.must.push(baseQuery);
+    mustClauses.push(baseQuery);
   }
 
   // Add filters
-  if (filters) {
-    for (const [key, value] of Object.entries(filters)) {
-      if (value !== undefined && value !== null) {
-        esQuery.bool.must.push({ term: { [key]: value } });
-      }
-    }
-  }
+  mustClauses.push(...buildFilterClauses(filters));
 
   // If no must clauses, use match_all
-  if (esQuery.bool.must.length === 0) {
-    esQuery.bool.must.push({ match_all: {} });
+  if (mustClauses.length === 0) {
+    mustClauses.push({ match_all: {} });
   }
-
-  // Determine sort field based on index name
-  // Examples use 'created', Spans use '@timestamp'
-  const sortField = indexName.includes('examples') ? 'created' : '@timestamp';
 
   const result = await client.search<T>({
     index: indexName,
-    query: esQuery,
+    query: { bool: { must: mustClauses } },
     size: limit,
     from: offset,
-    sort: [{ [sortField]: { order: 'desc' } }]
+    sort: [{ [getSortField(indexName)]: { order: 'desc' } }]
   });
 
-  const hits = (result.hits.hits || []).map((hit: any) => hit._source!);
-  const total = result.hits.total as number | { value: number };
+  const hits = (result.hits.hits || [])
+    .map((hit: any) => hit._source!)
+    .map(mergeUnindexedAttributes);
+  const total = extractTotal(result.hits.total as number | { value: number });
 
-  return { hits, total: typeof total === 'number' ? total : total.value };
+  return { hits, total };
 }
 

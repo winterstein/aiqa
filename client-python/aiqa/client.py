@@ -6,7 +6,7 @@ from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("AIQA")
 
 # Compatibility import for TraceIdRatioBased sampler
 # In older OpenTelemetry versions it was TraceIdRatioBasedSampler
@@ -77,7 +77,7 @@ def get_aiqa_client():
     try:
         _init_tracing()
     except Exception as e:
-        logger.error(f"Failed to initialize AIQA tracing: {e}", exc_info=True)
+        logger.error(f"Failed to initialize AIQA tracing: {e}")
         logger.warning("AIQA tracing is disabled. Your application will continue to run without tracing.")
     # optionally return a richer client object; for now you just need init    
     return client
@@ -122,7 +122,7 @@ def _init_tracing():
         logger.info(f"AIQA initialized and tracing (sampling rate: {sampling_rate:.2f}, server: {server_url})")
         
     except Exception as e:
-        logger.error(f"Error initializing AIQA tracing: {e}", exc_info=True)
+        logger.error(f"Error initializing AIQA tracing: {e}")
         raise
 
 def _attach_aiqa_processor(provider: TracerProvider):
@@ -143,7 +143,7 @@ def _attach_aiqa_processor(provider: TracerProvider):
         client["exporter"] = exporter
         logger.debug("AIQA span processor attached successfully")
     except Exception as e:
-        logger.error(f"Error attaching AIQA span processor: {e}", exc_info=True)
+        logger.error(f"Error attaching AIQA span processor: {e}")
         # Re-raise to let _init_tracing handle it - it will log and continue
         raise
 
@@ -165,6 +165,6 @@ def get_aiqa_tracer():
             # Fall back to without version parameter (older versions)
             return trace.get_tracer(AIQA_TRACER_NAME)
     except Exception as e:
-        logger.error(f"Error getting AIQA tracer: {e}", exc_info=True)
+        logger.error(f"Error getting AIQA tracer: {e}")
         # Return a basic tracer as fallback to prevent crashes
         return trace.get_tracer(AIQA_TRACER_NAME)

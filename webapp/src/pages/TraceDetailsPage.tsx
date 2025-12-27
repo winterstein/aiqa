@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Container, Row, Col } from 'reactstrap';
+import { Row, Col } from 'reactstrap';
 import { useQuery } from '@tanstack/react-query';
 import { createExampleFromSpans, listDatasets, searchSpans } from '../api';
 import { Span } from '../common/types';
@@ -209,7 +209,7 @@ const TraceDetailsPage: React.FC = () => {
   }, [spanTree, selectedSpanId, traceSpans]);
 
   return (
-    <Container className="mt-4">
+    <div className="mt-4" style={{ maxWidth: '100%', minWidth: 0, width: '100%', boxSizing: 'border-box' }}>
       <Row>
         <Col>
           <Link to={`/organisation/${organisationId}/traces`} className="btn btn-link mb-3">
@@ -219,7 +219,7 @@ const TraceDetailsPage: React.FC = () => {
         </Col>
       </Row>
       <Row>
-        <Col md={4}>
+        <Col md={4} style={{ minWidth: 0 }}>
           <h3>Span Tree</h3>
           {spanTree && (
             <SpanTreeViewer 
@@ -232,8 +232,8 @@ const TraceDetailsPage: React.FC = () => {
             />
           )}
         </Col>
-        <Col md={8}>
-          <h3>Span Details</h3>
+        <Col md={8} style={{ minWidth: 0 }}>
+          <h3>Span Details: {selectedSpan?.name || selectedSpanId}</h3>
           {selectedSpan ? (
             <SpanDetails span={selectedSpan} />
           ) : (
@@ -241,12 +241,12 @@ const TraceDetailsPage: React.FC = () => {
           )}
         </Col>
       </Row>
-      <Row>
-        <Col>
+      <Row style={{ margin: 0, maxWidth: '100%' }}>
+        <Col style={{ minWidth: 0, maxWidth: '100%', paddingLeft: '15px', paddingRight: '15px' }}>
           <FullJson json={traceSpans} />
         </Col>
       </Row>
-    </Container>
+    </div>
   );
 };
 
@@ -255,22 +255,31 @@ function FullJson({ json }: { json: any }) {
 	const jsonString = JSON.stringify(json, null, 2);
 	const {showToast} = useToast();
 	return (
-		<div style={{ marginTop: '30px', padding: '15px', border: '1px solid #ddd', borderRadius: '4px', backgroundColor: '#f9f9f9' }}>
-		  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+		<div style={{ marginTop: '30px', padding: '15px', border: '1px solid #ddd', borderRadius: '4px', backgroundColor: '#f9f9f9', maxWidth: '100%', minWidth: 0, width: '100%', boxSizing: 'border-box' }}>
+		  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', minWidth: 0, maxWidth: '100%' }}>
 			<strong>Full trace JSON</strong>
 			<CopyButton content={json} showToast={showToast} logToConsole  successMessage="Copied json to clipboard and logged to console." />
 		  </div>
 		  <pre style={{ 
 			fontSize: '11px', 
 			maxHeight: '150px', 
-			overflow: 'auto', 
+			maxWidth: '100%',
+			width: '100%',
+			minWidth: 0,
+			overflow: 'auto',
+			overflowX: 'auto',
+			overflowY: 'auto',
 			margin: 0,
 			padding: '10px',
 			backgroundColor: '#fff',
 			border: '1px solid #ddd',
-			borderRadius: '3px'
+			borderRadius: '3px',
+			wordBreak: 'break-all',
+			overflowWrap: 'anywhere',
+			whiteSpace: 'pre-wrap',
+			boxSizing: 'border-box'
 		  }}>
-			<code>{jsonString}</code>
+			<code style={{ maxWidth: '100%', wordBreak: 'break-all', overflowWrap: 'anywhere', display: 'block' }}>{jsonString}</code>
 		  </pre>
 		</div>
 	  )
@@ -319,12 +328,16 @@ function SpanTreeViewer({
 						borderRadius: '4px',
 						backgroundColor: isSelected ? '#e3f2fd' : 'transparent',
 						border: isSelected ? '2px solid #2196f3' : '2px solid transparent',
+						position: 'relative'
 					}}
 					onClick={handleSelect}
-				>
+				>									
+					{span.name && <div>Name: {(span as any).name}</div>}
 					<div>Span ID: {spanId}</div>
-					<div>Name: {(span as any).name || 'Unnamed'}</div>
 					<div>Duration: <span>{durationString(getDurationMs(span), durationUnit)}</span></div>
+				<div style={{ position: 'absolute', right: '20px', top: '10px' }}>
+					<CopyButton content={span} logToConsole />
+				</div>
 				</div>
 			</div>
 			{isExpanded && children.length > 0 && (
@@ -360,7 +373,7 @@ function SpanDetails({ span }: { span: Span }) {
 		: null;
 
 	return (
-		<div style={{ padding: '15px', border: '1px solid #ddd', borderRadius: '4px', backgroundColor: '#f9f9f9' }}>
+		<div style={{ padding: '15px', border: '1px solid #ddd', borderRadius: '4px', backgroundColor: '#f9f9f9', minWidth: 0, maxWidth: '100%' }}>
 			<div style={{ marginBottom: '15px' }}>
 				<div><strong>Span ID:</strong> {spanId}</div>
 				<div><strong>Name:</strong> {(span as any).name || 'Unnamed Span'}</div>
@@ -368,17 +381,17 @@ function SpanDetails({ span }: { span: Span }) {
 				<div><strong>Duration:</strong> {getDurationMs(span) ? `${getDurationMs(span)}ms` : 'N/A'}</div>
 			</div>
 			{inputText && (
-				<div style={{ marginTop: '15px' }}>
+				<div style={{ marginTop: '15px', minWidth: 0, maxWidth: '100%' }}>
 					<strong>Input:</strong>
-					<div style={{ marginTop: '10px', padding: '10px', backgroundColor: '#fff', border: '1px solid #ddd', borderRadius: '4px' }}>
+					<div style={{ marginTop: '10px', padding: '10px', backgroundColor: '#fff', border: '1px solid #ddd', borderRadius: '4px', overflowX: 'auto', maxWidth: '100%', minWidth: 0, wordBreak: 'break-all', overflowWrap: 'anywhere' }}>
 						<TextWithStructureViewer text={inputText} />
 					</div>
 				</div>
 			)}
 			{outputText && (
-				<div style={{ marginTop: '15px' }}>
+				<div style={{ marginTop: '15px', minWidth: 0, maxWidth: '100%' }}>
 					<strong>Output:</strong>
-					<div style={{ marginTop: '10px', padding: '10px', backgroundColor: '#fff', border: '1px solid #ddd', borderRadius: '4px' }}>
+					<div style={{ marginTop: '10px', padding: '10px', backgroundColor: '#fff', border: '1px solid #ddd', borderRadius: '4px', overflowX: 'auto', maxWidth: '100%', minWidth: 0, wordBreak: 'break-all', overflowWrap: 'anywhere' }}>
 						<TextWithStructureViewer text={outputText} />
 					</div>
 				</div>

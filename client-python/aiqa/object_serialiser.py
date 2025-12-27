@@ -8,8 +8,93 @@ import os
 import dataclasses
 from typing import Any, Callable, Set
 
+def toNumber(value: str|int|None) -> int:
+    """Convert string to number. handling units like g, m, k, (also mb kb gb though these should be avoided)"""
+    if value is None:
+        return 0
+    if isinstance(value, int):
+        return value    
+    if value.endswith("b"): # drop the b
+        value = value[:-1]
+    if value.endswith("g"):
+        return int(value[:-1]) * 1024 * 1024 * 1024
+    elif value.endswith("m"):
+        return int(value[:-1]) * 1024 * 1024
+    elif value.endswith("k"):
+        return int(value[:-1]) * 1024
+    return int(value)
+
+
 # Configurable limit for object string representation (in characters)
-_MAX_OBJECT_STR_CHARS = int(os.getenv("AIQA_MAX_OBJECT_STR_CHARS", "2000"))
+AIQA_MAX_OBJECT_STR_CHARS = toNumber(os.getenv("AIQA_MAX_OBJECT_STR_CHARS", "1m"))
+
+# Data filters configuration
+def _get_enabled_filters() -> Set[str]:
+    """Get set of enabled filter names from AIQA_DATA_FILTERS env var."""
+    filters_env = os.getenv("AIQA_DATA_FILTERS", "RemovePasswords, RemoveJWT")
+    if not filters_env:
+        return set()
+    return {f.strip() for f in filters_env.split(",") if f.strip()}
+
+_ENABLED_FILTERS = _get_enabled_filters()
+
+def _is_jwt_token(value: Any) -> bool:
+    """Check if a value looks like a JWT token (starts with 'eyJ' and has 3 parts separated by dots)."""
+    if not isinstance(value, str):
+        return False
+    # JWT tokens have format: header.payload.signature (3 parts separated by dots)
+    # They typically start with 'eyJ' (base64 encoded '{"')
+    parts = value.split('.')
+    return len(parts) == 3 and value.startswith('eyJ') and all(len(p) > 0 for p in parts)
+
+def _is_api_key(value: Any) -> bool:
+    """Check if a value looks like an API key based on common patterns."""
+    if not isinstance(value, str):
+        return False
+    value = value.strip()
+    # Common API key prefixes:
+    api_key_prefixes = [
+        'sk-',    # OpenAI secret key
+        'pk-',    # possibly public key
+        'AKIA',   # AWS access key
+        'ghp_',   # GitHub personal access token
+        'gho_',   # GitHub OAuth token
+        'ghu_',   # GitHub unidentified token
+        'ghs_',   # GitHub SAML token
+        'ghr_'    # GitHub refresh token
+    ]
+    return any(value.startswith(prefix) for prefix in api_key_prefixes)
+
+def _apply_data_filters(key: str, value: Any) -> Any:
+    """Apply data filters to a key-value pair based on enabled filters."""
+    if not value:  # Don't filter falsy values
+        return value
+    
+    key_lower = str(key).lower()
+    
+    # RemovePasswords filter: if key contains "password", replace value with "****"
+    if "RemovePasswords" in _ENABLED_FILTERS and "password" in key_lower:
+        return "****"
+    
+    # RemoveJWT filter: if value looks like a JWT token, replace with "****"
+    if "RemoveJWT" in _ENABLED_FILTERS and _is_jwt_token(value):
+        return "****"
+    
+    # RemoveAuthHeaders filter: if key is "authorization" (case-insensitive), replace value with "****"
+    if "RemoveAuthHeaders" in _ENABLED_FILTERS and key_lower == "authorization":
+        return "****"
+    
+    # RemoveAPIKeys filter: if key contains API key patterns or value looks like an API key
+    if "RemoveAPIKeys" in _ENABLED_FILTERS:
+        # Check key patterns
+        api_key_key_patterns = ['api_key', 'apikey', 'api-key', 'apikey']
+        if any(pattern in key_lower for pattern in api_key_key_patterns):
+            return "****"
+        # Check value patterns
+        if _is_api_key(value):
+            return "****"
+    
+    return value
 
 
 def serialize_for_span(value: Any) -> Any:
@@ -50,14 +135,14 @@ def safe_str_repr(value: Any) -> str:
     """
     Safely convert a value to string representation.
     Handles objects with __repr__ that might raise exceptions.
-    Uses AIQA_MAX_OBJECT_STR_CHARS environment variable (default: 2000) to limit length.
+    Uses AIQA_MAX_OBJECT_STR_CHARS environment variable (default: 100000) to limit length.
     """
     try:
         # Try __repr__ first (usually more informative)
         repr_str = repr(value)
         # Limit length to avoid huge strings
-        if len(repr_str) > _MAX_OBJECT_STR_CHARS:
-            return repr_str[:_MAX_OBJECT_STR_CHARS] + "... (truncated)"
+        if len(repr_str) > AIQA_MAX_OBJECT_STR_CHARS:
+            return repr_str[:AIQA_MAX_OBJECT_STR_CHARS] + "... (truncated)"
         return repr_str
     except Exception:
         # Fallback to type name
@@ -102,7 +187,8 @@ def object_to_dict(obj: Any, visited: Set[int], max_depth: int = 10, current_dep
             result = {}
             for k, v in obj.items():
                 key_str = str(k) if not isinstance(k, (str, int, float, bool)) else k
-                result[key_str] = object_to_dict(v, visited, max_depth, current_depth + 1)
+                filtered_value = _apply_data_filters(key_str, v)
+                result[key_str] = object_to_dict(filtered_value, visited, max_depth, current_depth + 1)
             visited.remove(obj_id)
             return result
         except Exception:
@@ -127,7 +213,8 @@ def object_to_dict(obj: Any, visited: Set[int], max_depth: int = 10, current_dep
             result = {}
             for field in dataclasses.fields(obj):
                 value = getattr(obj, field.name, None)
-                result[field.name] = object_to_dict(value, visited, max_depth, current_depth + 1)
+                filtered_value = _apply_data_filters(field.name, value)
+                result[field.name] = object_to_dict(filtered_value, visited, max_depth, current_depth + 1)
             visited.remove(obj_id)
             return result
         except Exception:
@@ -142,7 +229,8 @@ def object_to_dict(obj: Any, visited: Set[int], max_depth: int = 10, current_dep
             for key, value in obj.__dict__.items():
                 # Skip private attributes that start with __
                 if not (isinstance(key, str) and key.startswith("__")):
-                    result[key] = object_to_dict(value, visited, max_depth, current_depth + 1)
+                    filtered_value = _apply_data_filters(key, value)
+                    result[key] = object_to_dict(filtered_value, visited, max_depth, current_depth + 1)
             visited.remove(obj_id)
             return result
         except Exception:
@@ -157,7 +245,8 @@ def object_to_dict(obj: Any, visited: Set[int], max_depth: int = 10, current_dep
             for slot in obj.__slots__:
                 if hasattr(obj, slot):
                     value = getattr(obj, slot, None)
-                    result[slot] = object_to_dict(value, visited, max_depth, current_depth + 1)
+                    filtered_value = _apply_data_filters(slot, value)
+                    result[slot] = object_to_dict(filtered_value, visited, max_depth, current_depth + 1)
             visited.remove(obj_id)
             return result
         except Exception:
@@ -170,7 +259,8 @@ def object_to_dict(obj: Any, visited: Set[int], max_depth: int = 10, current_dep
         for attr in ["name", "id", "value", "type", "status"]:
             if hasattr(obj, attr):
                 value = getattr(obj, attr, None)
-                result[attr] = object_to_dict(value, visited, max_depth, current_depth + 1)
+                filtered_value = _apply_data_filters(attr, value)
+                result[attr] = object_to_dict(filtered_value, visited, max_depth, current_depth + 1)
         if result:
             return result
     except Exception:
@@ -180,7 +270,7 @@ def object_to_dict(obj: Any, visited: Set[int], max_depth: int = 10, current_dep
     return safe_str_repr(obj)
 
 
-def safe_json_dumps(value: Any, max_size_mb: float = 1.0) -> str:
+def safe_json_dumps(value: Any) -> str:
     """
     Safely serialize a value to JSON string with safeguards against:
     - Circular references
@@ -189,12 +279,13 @@ def safe_json_dumps(value: Any, max_size_mb: float = 1.0) -> str:
     
     Args:
         value: The value to serialize
-        max_size_mb: Maximum size in MB for the JSON string (default: 1MB)
+
+    Uses AIQA_MAX_OBJECT_STR_CHARS environment variable (default: 1000000) to limit length.
     
     Returns:
         JSON string representation
-    """
-    max_size_bytes = int(max_size_mb * 1024 * 1024)
+    """    
+    max_size_chars = AIQA_MAX_OBJECT_STR_CHARS
     visited: Set[int] = set()
     
     # Convert the entire structure to ensure circular references are detected
@@ -205,8 +296,8 @@ def safe_json_dumps(value: Any, max_size_mb: float = 1.0) -> str:
         # If conversion fails, try with a fresh visited set and json default handler
         try:
             json_str = json.dumps(value, default=json_default_handler_factory(set()))
-            if len(json_str.encode('utf-8')) > max_size_bytes:
-                return f"<object too large: {len(json_str)} bytes (limit: {max_size_bytes} bytes)>"
+            if len(json_str) > max_size_chars:
+                return f"<object too large: {len(json_str)} chars (limit: {max_size_chars} chars)>"
             return json_str
         except Exception:
             return safe_str_repr(value)
@@ -215,8 +306,8 @@ def safe_json_dumps(value: Any, max_size_mb: float = 1.0) -> str:
     try:
         json_str = json.dumps(converted, default=json_default_handler_factory(set()))
         # Check size
-        if len(json_str.encode('utf-8')) > max_size_bytes:
-            return f"<object too large: {len(json_str)} bytes (limit: {max_size_bytes} bytes)>"
+        if len(json_str) > max_size_chars:
+            return f"<object too large: {len(json_str)} chars (limit: {max_size_chars} chars)>"
         return json_str
     except Exception:
         # Final fallback

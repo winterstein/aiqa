@@ -129,7 +129,7 @@ export class ExperimentRunner {
 			results: [],
 			summary_results: {},
 		};
-		console.log('Creating experiment');
+		console.log('AIQA: Creating experiment');
 		const response = await fetch(`${this.serverUrl}/experiment`, {
 			method: 'POST',
 			headers: {
@@ -158,8 +158,8 @@ export class ExperimentRunner {
 		if (!this.experimentId) {
 			await this.createExperiment();
 		}
-		console.log('Scoring and storing example:', example.id);
-		console.log('Scores:', scores);
+		console.log('AIQA: Scoring and storing example:', example.id);
+		console.log('AIQA: Scores:', scores);
 		const response = await fetch(`${this.serverUrl}/experiment/${this.experimentId}/example/${example.id}/scoreAndStore`, {
 			method: 'POST',
 			headers: {
@@ -177,7 +177,7 @@ export class ExperimentRunner {
 			throw new Error(`Failed to score and store: ${response.status} ${response.statusText} - ${errorText}`);
 		}
 		const jsonResult = await response.json();
-		console.log('scoreAndStore response:', jsonResult);
+		console.log('AIQA: scoreAndStore response:', jsonResult);
 		return jsonResult;
 	}
 
@@ -225,14 +225,14 @@ export class ExperimentRunner {
 		// Handle both spans array and input field
 		const input = example.input || (example.spans && example.spans.length > 0 ? example.spans[0].attributes?.input : undefined);
 		if (!input) {
-			console.warn('Example has no input field or spans with input attribute:', example);
+			console.warn('AIQA: Example has no input field or spans with input attribute:', example);
 			// run engine anyway -- this could make sense if its all about the parameters
 		}
 		let allScores: ScoreResult[] = [];
 		// This loop should not be parallelized - it should run sequentially, one after the other - to avoid creating interference between the runs.
 		for (const parameters of parametersLoop) {			
 			const parametersHere = { ...parametersFixed, ...parameters };
-			console.log('Running with parameters:', parametersHere);
+			console.log('AIQA: Running with parameters:', parametersHere);
 			// set env vars from parametersHere
 			for (const [key, value] of Object.entries(parametersHere)) {
 				if (value) {
@@ -242,7 +242,7 @@ export class ExperimentRunner {
 			const start = Date.now();
 			let pOutput = callMyCode(input, parametersHere);
 			const output = pOutput instanceof Promise ? await pOutput : pOutput;
-			console.log('Output:', output);
+			console.log('AIQA: Output:', output);
 			const end = Date.now();
 			const duration = end - start;
 
@@ -252,9 +252,9 @@ export class ExperimentRunner {
 			}
 			scores['duration'] = duration;
 			// TODO this call as async and wait for all to complete before returning
-			console.log('Call scoreAndStore ... for example:', example.id, 'with scores:', scores);
+			console.log('AIQA: Call scoreAndStore ... for example:', example.id, 'with scores:', scores);
 			const result = await this.scoreAndStore(example, output, scores);
-			console.log('scoreAndStore returned:', result);
+			console.log('AIQA: scoreAndStore returned:', result);
 			allScores.push(result);
 		}
 		return allScores;

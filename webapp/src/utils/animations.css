@@ -1,0 +1,132 @@
+/* Page transition animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.page-enter {
+  animation: fadeIn 0.4s ease-out;
+}
+
+/* Progress indicator animations */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.05);
+  }
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(-10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.progress-complete {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.progress-step-complete {
+  animation: slideIn 0.3s ease-out;
+}
+
+/* Progress bar animation */
+@keyframes progressFill {
+  from {
+    width: 0;
+  }
+}
+
+.progress-bar-animated {
+  animation: progressFill 0.6s ease-out;
+}
+
+/* Checkmark animation */
+@keyframes checkmark {
+  0% {
+    transform: scale(0);
+  }
+  50% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.checkmark-animate {
+  animation: checkmark 0.4s ease-out;
+}
+
+/* LeftNav styles */
+.left-nav {
+  min-height: calc(100vh - 56px);
+  background-color: #f8f9fa;
+}
+
+.progress-section {
+  padding: 0 8px;
+}
+
+.progress-label {
+  font-size: 0.75rem;
+}
+
+.progress-bar-container {
+  height: 6px;
+  background-color: #e9ecef;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-bar-animated {
+  height: 100%;
+  background-color: #28a745;
+  transition: width 0.6s ease-out;
+}
+
+.nav-link-item {
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 8px 12px;
+  transition: all 0.3s ease;
+}
+
+.nav-link-item.disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.step-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  margin-right: 8px;
+  transition: all 0.3s ease;
+}
+
+.checkmark-icon {
+  font-size: 0.9rem;
+}
+

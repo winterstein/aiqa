@@ -1,74 +1,38 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Container, Row, Col } from 'reactstrap';
 import { ColumnDef } from '@tanstack/react-table';
 import { searchSpans } from '../api';
 import { Span } from '../common/types';
 import TableUsingAPI, { PageableData } from '../components/generic/TableUsingAPI';
+import TracesListDashboard from '../components/TracesListDashboard';
+import { getTraceId, getStartTime, getDurationMs, getTotalTokenCount, getCost } from '../utils/span-utils';
 
-const getTraceId = (span: Span) => {
-  return (span as any).client_trace_id || (span as any).traceId || (span as any).spanContext?.()?.traceId || '';
-};
-
-const getStartTime = (span: Span) => {
-  const startTime = (span as any).startTime;
-  if (!startTime) return null;
-  // Handle HrTime tuple [seconds, nanoseconds]
-  if (Array.isArray(startTime) && startTime.length === 2) {
-    return new Date(startTime[0] * 1000 + startTime[1] / 1000000);
-  }
-  // Handle if it's already a number (milliseconds)
-  if (typeof startTime === 'number') {
-    return new Date(startTime);
-  }
-  // Handle if it's already a Date
-  if (startTime instanceof Date) {
-    return startTime;
-  }
-  return null;
-};
-
-const getDuration = (span: Span): number | null => {
-  const startTimeHr = (span as any).startTime;
-  const endTimeHr = (span as any).endTime;
-  
-  // Calculate duration from HrTime tuples if available
-  if (Array.isArray(startTimeHr) && Array.isArray(endTimeHr) && startTimeHr.length === 2 && endTimeHr.length === 2) {
-    const startMs = startTimeHr[0] * 1000 + startTimeHr[1] / 1000000;
-    const endMs = endTimeHr[0] * 1000 + endTimeHr[1] / 1000000;
-    return endMs - startMs;
-  } else if ((span as any).duration && Array.isArray((span as any).duration)) {
-    // Duration as HrTime tuple
-    const durHr = (span as any).duration;
-    return durHr[0] * 1000 + durHr[1] / 1000000;
-  }
-  return null;
-};
-
-const getTotalTokenCount = (span: Span): number | null => {
+const getFeedback = (span: Span): { type: 'positive' | 'negative' | 'neutral' | null; comment?: string } | null => {
   const attributes = (span as any).attributes || {};
-  const totalTokens = attributes['gen_ai.usage.total_tokens'] as number | undefined;
-  if (totalTokens !== undefined) {
-    return totalTokens;
-  }
-  // Calculate from input + output if total not available
-  const inputTokens = attributes['gen_ai.usage.input_tokens'] as number | undefined;
-  const outputTokens = attributes['gen_ai.usage.output_tokens'] as number | undefined;
-  if (inputTokens !== undefined || outputTokens !== undefined) {
-    return (inputTokens || 0) + (outputTokens || 0);
+  const spanType = attributes['aiqa.span_type'];
+  if (spanType === 'feedback') {
+    const feedbackType = attributes['feedback.type'] as string | undefined;
+    const thumbsUp = attributes['feedback.thumbs_up'] as boolean | undefined;
+    const comment = attributes['feedback.comment'] as string | undefined;
+    
+    let type: 'positive' | 'negative' | 'neutral' = 'neutral';
+    if (feedbackType === 'positive' || thumbsUp === true) {
+      type = 'positive';
+    } else if (feedbackType === 'negative' || thumbsUp === false) {
+      type = 'negative';
+    }
+    
+    return { type, comment };
   }
   return null;
-};
-
-const getCost = (span: Span): number | null => {
-  const attributes = (span as any).attributes || {};
-  const cost = attributes['gen_ai.cost.usd'] as number | undefined;
-  return cost !== undefined ? cost : null;
 };
 
 const TracesListPage: React.FC = () => {
   const { organisationId } = useParams<{ organisationId: string }>();
   const navigate = useNavigate();
+  const [feedbackMap, setFeedbackMap] = useState<Map<string, { type: 'positive' | 'negative' | 'neutral'; comment?: string }>>(new Map());
+  const [allSpans, setAllSpans] = useState<Span[]>([]);
 
   const loadData = async (query: string): Promise<PageableData<Span>> => {
     const limit = 1000; // Fetch more traces for in-memory filtering
@@ -91,6 +55,37 @@ const TracesListPage: React.FC = () => {
         startTime: (result.hits[0] as any).startTime,
         duration: (result.hits[0] as any).duration,
       });
+      
+      // Fetch feedback spans for all traces
+      const traceIds = result.hits.map(span => getTraceId(span)).filter(id => id);
+      if (traceIds.length > 0) {
+        // Query for feedback spans - use attribute path format
+        const feedbackQuery = traceIds.map(id => `traceId:${id}`).join(' OR ');
+        const feedbackResult = await searchSpans({
+          organisationId: organisationId!,
+          query: `(${feedbackQuery}) AND attributes.aiqa\\.span_type:feedback`,
+          limit: 1000,
+          offset: 0
+        });
+        
+        // Create feedback map
+        const newFeedbackMap = new Map<string, { type: 'positive' | 'negative' | 'neutral'; comment?: string }>();
+        if (feedbackResult.hits) {
+          feedbackResult.hits.forEach((span: Span) => {
+            const traceId = getTraceId(span);
+            if (traceId) {
+              const feedback = getFeedback(span);
+              if (feedback && feedback.type !== null) {
+                newFeedbackMap.set(traceId, feedback);
+              }
+            }
+          });
+        }
+        setFeedbackMap(newFeedbackMap);
+      }
+      
+      // Store all spans for dashboard
+      setAllSpans(result.hits || []);
     }
     
     return result;
@@ -98,7 +93,22 @@ const TracesListPage: React.FC = () => {
 
   const columns = useMemo<ColumnDef<Span>[]>(
     () => [
-      {
+		{
+			id: 'startTime',
+			header: 'Start Time',
+			accessorFn: (row) => {
+			  const startTime = getStartTime(row);
+			  return startTime ? startTime.getTime() : null;
+			},
+			cell: ({ row }) => {
+			  const startTime = getStartTime(row.original);
+			  console.log('[TracesListPage] startTime cell render:', { startTime, span: row.original });
+			  return <span>{startTime ? startTime.toLocaleString() : 'N/A'}</span>;
+			},
+			enableSorting: true,
+		  },
+	
+		{
         id: 'traceId',
         header: 'Trace ID',
         cell: ({ row }) => {
@@ -118,28 +128,14 @@ const TracesListPage: React.FC = () => {
         },
       },
       {
-        id: 'startTime',
-        header: 'Start Time',
-        accessorFn: (row) => {
-          const startTime = getStartTime(row);
-          return startTime ? startTime.getTime() : null;
-        },
-        cell: ({ row }) => {
-          const startTime = getStartTime(row.original);
-          console.log('[TracesListPage] startTime cell render:', { startTime, span: row.original });
-          return <span>{startTime ? startTime.toLocaleString() : 'N/A'}</span>;
-        },
-        enableSorting: true,
-      },
-      {
         id: 'duration',
         header: 'Duration',
         accessorFn: (row) => {
-          const duration = getDuration(row);
+          const duration = getDurationMs(row);
           return duration !== null ? duration : null;
         },
         cell: ({ row }) => {
-          const duration = getDuration(row.original);
+          const duration = getDurationMs(row.original);
           console.log('[TracesListPage] duration cell render:', { duration, span: row.original });
           if (duration === null) return <span>N/A</span>;
           // Format duration nicely
@@ -157,7 +153,7 @@ const TracesListPage: React.FC = () => {
       },
       {
         id: 'totalTokens',
-        header: 'Total Tokens',
+        header: 'Tokens',
         accessorFn: (row) => {
           const tokenCount = getTotalTokenCount(row);
           return tokenCount !== null ? tokenCount : null;
@@ -199,8 +195,31 @@ const TracesListPage: React.FC = () => {
           return <span>{component || 'N/A'}</span>;
         },
       },
+      {
+        id: 'feedback',
+        header: 'Feedback',
+        cell: ({ row }) => {
+          const traceId = getTraceId(row.original);
+          const feedback = traceId ? feedbackMap.get(traceId) : null;
+          if (!feedback) {
+            return <span className="text-muted">—</span>;
+          }
+          return (
+            <span>
+              {feedback.type === 'positive' && <span className="text-success">👍</span>}
+              {feedback.type === 'negative' && <span className="text-danger">👎</span>}
+              {feedback.type === 'neutral' && <span className="text-muted">○</span>}
+              {feedback.comment && (
+                <span className="ms-2" title={feedback.comment}>
+                  💬
+                </span>
+              )}
+            </span>
+          );
+        },
+      },
     ],
-    [organisationId]
+    [organisationId, feedbackMap]
   );
 
   return (
@@ -211,10 +230,19 @@ const TracesListPage: React.FC = () => {
         </Col>
       </Row>
 
+      {allSpans.length > 0 && (
+        <Row className="mt-3">
+          <Col>
+            <TracesListDashboard spans={allSpans} feedbackMap={feedbackMap} />
+          </Col>
+        </Row>
+      )}
+
       <Row className="mt-3">
         <Col>
           <TableUsingAPI
             loadData={loadData}
+			refetchInterval={30000} // 30 seconds
             columns={columns}
             searchPlaceholder="Search traces"
             searchDebounceMs={500}

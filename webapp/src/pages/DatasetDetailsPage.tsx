@@ -13,6 +13,7 @@ import { useToast } from '../utils/toast';
 import TableUsingAPI, { PageableData } from '../components/generic/TableUsingAPI';
 import MetricModal from '../components/MetricModal';
 import CopyButton from '../components/generic/CopyButton';
+import PropInput from '../components/generic/PropInput';
 
 // Helper to get the first span from an Example, or return the example itself if it has span-like fields
 function getFirstSpan(example: Example): Span | null {
@@ -185,7 +186,15 @@ const DatasetDetailsPage: React.FC = () => {
           <Link to={`/organisation/${organisationId}/dataset`} className="btn btn-link mb-3">
             ← Back to Datasets
           </Link>
-          <h1>{dataset.name}</h1>
+          <h1>Dataset: <PropInput 
+            item={dataset} 
+            prop="name" 
+            label="" 
+            inline 
+            onChange={() => {
+              updateDatasetMutation.mutate({ name: dataset.name });
+            }}
+          /></h1>
 		  <ListGroup flush>
 			<ListGroupItem>
 				<div className="d-flex align-items-center gap-2">
@@ -199,8 +208,14 @@ const DatasetDetailsPage: React.FC = () => {
 				</div>
 			</ListGroupItem>
                 <ListGroupItem>
-                  <strong>Description:</strong>{' '}
-                  {dataset.description || <span className="text-muted">Not provided</span>}
+                  <PropInput 
+                    item={dataset} 
+                    prop="description" 
+                    type="textarea"
+                    onChange={() => {
+                      updateDatasetMutation.mutate({ description: dataset.description });
+                    }}
+                  />
                 </ListGroupItem>
                 <ListGroupItem>
                   <strong>Tags:</strong>{' '}

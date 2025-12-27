@@ -139,12 +139,16 @@ func (e *AIQAExporter) serializeSpan(span trace.ReadOnlySpan) SerializableSpan {
 	
 	attributes := make(map[string]interface{})
 	for _, kv := range span.Attributes() {
-		attributes[string(kv.Key)] = kv.Value.AsInterface()
+		key := string(kv.Key)
+		value := kv.Value.AsInterface()
+		attributes[key] = applyDataFilters(key, value)
 	}
 	
 	resourceAttrs := make(map[string]interface{})
 	span.Resource().Attributes().Range(func(kv attribute.KeyValue) bool {
-		resourceAttrs[string(kv.Key)] = kv.Value.AsInterface()
+		key := string(kv.Key)
+		value := kv.Value.AsInterface()
+		resourceAttrs[key] = applyDataFilters(key, value)
 		return true
 	})
 	
@@ -152,7 +156,9 @@ func (e *AIQAExporter) serializeSpan(span trace.ReadOnlySpan) SerializableSpan {
 	for _, link := range span.Links() {
 		linkAttrs := make(map[string]interface{})
 		for _, kv := range link.Attributes {
-			linkAttrs[string(kv.Key)] = kv.Value.AsInterface()
+			key := string(kv.Key)
+			value := kv.Value.AsInterface()
+			linkAttrs[key] = applyDataFilters(key, value)
 		}
 		links = append(links, SpanLink{
 			Context: SpanContext{
@@ -167,7 +173,9 @@ func (e *AIQAExporter) serializeSpan(span trace.ReadOnlySpan) SerializableSpan {
 	for _, event := range span.Events() {
 		eventAttrs := make(map[string]interface{})
 		for _, kv := range event.Attributes {
-			eventAttrs[string(kv.Key)] = kv.Value.AsInterface()
+			key := string(kv.Key)
+			value := kv.Value.AsInterface()
+			eventAttrs[key] = applyDataFilters(key, value)
 		}
 		eventUnix := event.Time.Unix()
 		eventNano := int64(event.Time.Nanosecond())
@@ -225,7 +233,7 @@ func (e *AIQAExporter) Flush(ctx context.Context) error {
 	}
 	
 	if e.serverURL == "" {
-		fmt.Printf("Skipping flush: AIQA_SERVER_URL is not set. %d span(s) will not be sent.\n", len(spansToFlush))
+		fmt.Printf("AIQA: Skipping flush: AIQA_SERVER_URL is not set. %d span(s) will not be sent.\n", len(spansToFlush))
 		return nil
 	}
 	
@@ -275,7 +283,7 @@ func (e *AIQAExporter) startAutoFlush() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			if err := e.Flush(ctx); err != nil {
-				fmt.Printf("Error in auto-flush: %v\n", err)
+				fmt.Printf("AIQA: Error in auto-flush: %v\n", err)
 			}
 			if !e.shutdownRequested {
 				e.startAutoFlush()

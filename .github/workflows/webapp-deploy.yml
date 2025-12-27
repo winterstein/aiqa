@@ -1,0 +1,65 @@
+name: Deploy Webapp
+
+on:
+  push:
+    paths:
+      - 'webapp/**'
+      - '.github/workflows/webapp-deploy.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Install dependencies
+        working-directory: ./webapp
+        run: pnpm install --frozen-lockfile
+
+      - name: Build webapp
+        working-directory: ./webapp
+        env:
+          VITE_AIQA_SERVER_URL: ${{ secrets.VITE_AIQA_SERVER_URL || 'http://localhost:4001' }}
+          VITE_AUTH0_DOMAIN: ${{ secrets.VITE_AUTH0_DOMAIN }}
+          VITE_AUTH0_CLIENT_ID: ${{ secrets.VITE_AUTH0_CLIENT_ID }}
+          VITE_AUTH0_AUDIENCE: ${{ secrets.VITE_AUTH0_AUDIENCE }}
+        run: pnpm run build
+
+      - name: Deploy to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          source: "webapp/dist"
+          target: "/opt/aiqa/webapp"
+          strip_components: 1
+          rm: true
+
+      - name: Restart webapp service
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          script: |
+            sudo mkdir -p /opt/aiqa/webapp/dist
+            sudo chown -R www-data:www-data /opt/aiqa/webapp
+            sudo systemctl reload nginx
+            sudo systemctl status nginx
+

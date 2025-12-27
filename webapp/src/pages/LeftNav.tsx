@@ -1,52 +1,19 @@
 import React from 'react';
 import { useParams, useLocation, Link } from 'react-router-dom';
 import { Nav, NavItem, NavLink } from 'reactstrap';
+import { useStepCompletion, STEP_FLOW } from '../utils/stepProgress';
+import '../utils/animations.css';
 
 const LeftNav: React.FC = () => {
 	const { organisationId } = useParams<{ organisationId: string }>();
 	const location = useLocation();
+	const completion = useStepCompletion(organisationId);
 
-	const navItems = [
-		{
-			label: 'Organisation',
-			path: `/organisation`,
-		},
-		{
-			label: 'API Key',
-			path: `/organisation/${organisationId}/api-key`,
-			disabled: !organisationId,
-		},
-		{
-			label: 'Code Setup',
-			path: `/organisation/${organisationId}/code-setup`,
-			disabled: !organisationId,
-		},
-		{
-			label: 'Traces',
-			path: `/organisation/${organisationId}/traces`,
-			disabled: !organisationId,
-		},
-		{
-			label: 'Datasets',
-			path: `/organisation/${organisationId}/dataset`,
-			disabled: !organisationId,
-		},
-		{
-			label: 'Metrics',
-			path: `/organisation/${organisationId}/metrics`,
-			disabled: !organisationId,
-		},
-		{
-			label: 'Experiment Code',
-			path: `/organisation/${organisationId}/experiment-code`,
-			disabled: !organisationId,
-		},
-		{
-			label: 'Experiment Results',
-			path: `/organisation/${organisationId}/experiment`,
-			disabled: !organisationId,
-		}
-	];
+	// Use STEP_FLOW as the source of truth for navigation items
+	const navItems = STEP_FLOW.map(step => ({
+		...step,
+		path: step.path(organisationId || ''),
+	}));
 
 	const isActive = (path: string) => {
 		if (path === `/organisation/${organisationId}` || path === '/organisation') {
@@ -55,47 +22,69 @@ const LeftNav: React.FC = () => {
 		return location.pathname.startsWith(path);
 	};
 
+	// Calculate overall progress
+	const totalSteps = navItems.length;
+	const completedSteps = navItems.filter(item => completion[item.id]).length;
+	const progressPercent = (completedSteps / totalSteps) * 100;
+	const isDisabled = (path: string) => path !== '/organisation' && (!organisationId || path.includes('undefined'));
+
 	return (
-		<Nav vertical className="p-3 border-end" style={{ minHeight: 'calc(100vh - 56px)', backgroundColor: '#f8f9fa' }}>
-			{navItems.map((item, index) => (
-				<NavItem key={item.path}>
-					<NavLink
-						tag={Link}
-						to={item.path}
-						active={isActive(item.path)}
-						className="mb-2"
+		<Nav vertical className="p-3 border-end left-nav">
+			{/* Progress bar */}
+			<div className="progress-section mb-3">
+				<div className="d-flex justify-content-between align-items-center mb-2">
+					<small className="text-muted progress-label">Progress</small>
+					<small className="text-muted progress-label">{completedSteps}/{totalSteps}</small>
+				</div>
+				<div className="progress-bar-container">
+					<div
+						className="progress-bar-animated"
 						style={{
-							cursor: 'pointer',
-							borderRadius: '4px',
-							padding: '8px 12px',
+							width: `${progressPercent}%`,
 						}}
-						disabled={item.disabled}
-					>
-						<Number n={index+1} done={true} />
-						{item.label}
-					</NavLink>
-				</NavItem>
-			))}
+					/>
+				</div>
+			</div>
+
+			{navItems.map((item, index) => {
+				const isDone = completion[item.id];
+				const isCurrent = isActive(item.path);
+				const disabled = isDisabled(item.path);
+				const isSmall = isDone && (item.id === 'code-setup' || item.id === 'experiment-code');
+				return (
+					<NavItem key={item.id}>
+						<NavLink
+							tag={Link}
+							to={item.path}
+							active={isCurrent}
+							className={`nav-link-item mb-2 ${isDone ? 'progress-step-complete' : ''} ${disabled ? 'disabled' : ''}`}
+							disabled={disabled}
+							style={{
+								fontSize: isSmall ? '0.8rem' : '1rem',
+							}}
+						>
+							<Number n={index+1} done={isDone} isCurrent={isCurrent} />
+							{item.label}
+							{isDone && (
+								<span className="ms-2 checkmark-animate checkmark-icon">✓</span>
+							)}
+						</NavLink>
+					</NavItem>
+				);
+			})}
 		</Nav>
 	);
 };
 
 
-function Number({ n, done }: { n: number, done: boolean }) {
+function Number({ n, done, isCurrent }: { n: number, done: boolean, isCurrent?: boolean }) {
+	const bgColor = done ? '#28a745' : isCurrent ? '#007bff' : '#6c757d';
 	return (
 		<span
+			className={`step-number ${done ? 'progress-complete' : ''}`}
 			style={{
-				display: 'inline-flex',
-				alignItems: 'center',
-				justifyContent: 'center',
-				width: '24px',
-				height: '24px',
-				borderRadius: '50%',
-				backgroundColor: done ? '#28a745' : '#6c757d',
-				color: '#ffffff',
-				fontSize: '12px',
-				fontWeight: '600',
-				marginRight: '8px',
+				backgroundColor: bgColor,
+				boxShadow: done ? '0 2px 8px rgba(40, 167, 69, 0.3)' : 'none',
 			}}
 		>
 			{n}

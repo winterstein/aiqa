@@ -37,6 +37,11 @@ const TopNav: React.FC = () => {
         <Logo size={32} showText={true} />
         <Nav className="ms-auto" navbar>
 			<NavItem>
+				<NavLink href="https://www-aiqa.winterwell.com" target="_blank" rel="noopener">
+					Website
+				</NavLink>
+			</NavItem>
+			<NavItem>
 				<NavLink href="/organisation">
 					{organisation?.name}
 				</NavLink>

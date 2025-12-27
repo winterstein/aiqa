@@ -91,6 +91,16 @@ function generateEsMappingsFromSchema(properties: Record<string, any>): Record<s
   return mappings;
 }
 
+/**
+ * Add unindexed_attributes mapping to a mappings object.
+ */
+function addUnindexedAttributesMapping(mappings: any): void {
+  mappings.unindexed_attributes = {
+    type: 'object',
+    enabled: false  // Disable indexing to allow storing large values without truncation
+  };
+}
+
 // Generate Elasticsearch mappings from Span schema
 function generateSpanMappings(): any {
   const spanSchema = loadSchema('Span');
@@ -101,7 +111,9 @@ function generateSpanMappings(): any {
   }
   
   // Generate all mappings from schema (including nested objects)
-  return generateEsMappingsFromSchema(spanDef.properties);
+  const mappings = generateEsMappingsFromSchema(spanDef.properties);
+  addUnindexedAttributesMapping(mappings);
+  return mappings;
 }
 
 // Generate Elasticsearch mappings for Example schema
@@ -128,6 +140,7 @@ function generateExampleMappings(): any {
     mappings.inputs = { type: 'object', enabled: false };
   }
   
+  addUnindexedAttributesMapping(mappings);
   return mappings;
 }
 
@@ -179,40 +192,202 @@ function hrTimeToMillis(hrTime: [number, number] | undefined): number | undefine
   return hrTime[0] * 1000 + Math.floor(hrTime[1] / 1000000);
 }
 
+// Elasticsearch flattened fields have a max value size of 32,766 bytes
+// We truncate to 30KB to leave some margin for encoding overhead
+const MAX_ATTRIBUTE_VALUE_SIZE = 30 * 1024; // 30KB
+
+/**
+ * Truncate a string to fit within a byte limit, preserving UTF-8 encoding.
+ */
+function truncateStringToByteLength(str: string, maxBytes: number): string {
+  const buffer = Buffer.from(str, 'utf8');
+  if (buffer.length <= maxBytes) {
+    return str;
+  }
+  // Truncate buffer and convert back, handling potential incomplete UTF-8 sequences
+  const truncated = buffer.subarray(0, maxBytes);
+  // Find the last valid UTF-8 character boundary
+  let end = truncated.length;
+  while (end > 0 && (truncated[end] & 0xc0) === 0x80) {
+    end--;
+  }
+  return truncated.subarray(0, end).toString('utf8');
+}
+
+/**
+ * Truncate large string values in attributes to prevent Elasticsearch flattened field errors.
+ * Values exceeding MAX_ATTRIBUTE_VALUE_SIZE are truncated and a flag is added.
+ * Returns both truncated attributes and big attributes (original values that were too large).
+ */
+function truncateLargeAttributeValues(attributes: any): { truncated: any; bigAttributes: any } {
+  if (!attributes || typeof attributes !== 'object') {
+    return { truncated: attributes, bigAttributes: {} };
+  }
+
+  const truncated: any = {};
+  const bigAttributes: any = {};
+  for (const [key, value] of Object.entries(attributes)) {
+    try {
+      const stringValue = typeof value !== 'string' ? JSON.stringify(value) : value;
+      const byteSize = Buffer.byteLength(stringValue, 'utf8');
+      if (byteSize > MAX_ATTRIBUTE_VALUE_SIZE) {
+        const safeSize = MAX_ATTRIBUTE_VALUE_SIZE - 200; // Leave room for metadata keys
+        truncated[key] = truncateStringToByteLength(stringValue, safeSize);
+        truncated[`${key}_truncated`] = true;
+        truncated[`${key}_original_size`] = byteSize;
+        bigAttributes[key] = value;
+      } else {
+        truncated[key] = value;
+      }
+    } catch (error: any) {
+      console.error(`Error truncating attribute value for ${key}:`, error.message);
+      truncated[key] = value;
+    }
+  }
+  return { truncated, bigAttributes };
+}
+
+/**
+ * Check if an object has any keys.
+ */
+function hasKeys(obj: any): boolean {
+  return obj && typeof obj === 'object' && Object.keys(obj).length > 0;
+}
+
+/**
+ * Process attributes field: truncate and collect big attributes.
+ * Returns the truncated attributes and big attributes (if any).
+ */
+function processAttributes(attributes: any): { truncated: any; bigAttributes: any } {
+  if (!attributes) return { truncated: attributes, bigAttributes: {} };
+  const { truncated, bigAttributes } = truncateLargeAttributeValues(attributes);
+  return { truncated, bigAttributes };
+}
+
+/**
+ * Process an array of items that may have attributes, collecting big attributes by index.
+ * Returns transformed array and array of big attributes indexed by position.
+ */
+function processArrayWithAttributes<T>(
+  array: T[] | undefined,
+  transformItem: (item: T, index: number) => { transformed: any; bigAttributes?: any }
+): { transformed: any[]; bigAttributes: any[] } {
+  if (!Array.isArray(array)) return { transformed: array || [], bigAttributes: [] };
+  
+  const transformed: any[] = [];
+  const bigAttributes: any[] = [];
+  
+  array.forEach((item, index) => {
+    const { transformed: itemTransformed, bigAttributes: itemBigAttrs } = transformItem(item, index);
+    transformed.push(itemTransformed);
+    if (hasKeys(itemBigAttrs)) {
+      bigAttributes[index] = itemBigAttrs;
+    }
+  });
+  
+  return { transformed, bigAttributes };
+}
+
+/**
+ * Convert HrTime tuple [seconds, nanoseconds] to milliseconds for multiple fields.
+ */
+function convertHrTimeFields(obj: any, fields: string[]): void {
+  for (const field of fields) {
+    if (Array.isArray(obj[field]) && obj[field].length === 2) {
+      obj[field] = hrTimeToMillis(obj[field] as [number, number]);
+    }
+  }
+}
+
 // Transform span document for Elasticsearch (convert HrTime tuples to milliseconds)
 function transformSpanForEs(doc: any): any {
   const transformed = { ...doc };
-  if (Array.isArray(transformed.startTime)) {
-    transformed.startTime = hrTimeToMillis(transformed.startTime);
+  const unindexedBigAttributes: any = {};
+  
+  // Convert HrTime fields to milliseconds
+  convertHrTimeFields(transformed, ['startTime', 'endTime', 'duration']);
+  
+  // Process top-level attributes
+  const { truncated: attrsTruncated, bigAttributes: attrsBig } = processAttributes(transformed.attributes);
+  transformed.attributes = attrsTruncated;
+  if (hasKeys(attrsBig)) {
+    unindexedBigAttributes.attributes = attrsBig;
   }
-  if (Array.isArray(transformed.endTime)) {
-    transformed.endTime = hrTimeToMillis(transformed.endTime);
-  }
-  if (Array.isArray(transformed.duration)) {
-    transformed.duration = hrTimeToMillis(transformed.duration);
-  }
-  // Transform events array - convert time to timestamp
-  if (Array.isArray(transformed.events)) {
-    transformed.events = transformed.events.map((event: any) => {
-      if (event && Array.isArray(event.time)) {
-        const { time, ...rest } = event;
-        return { ...rest, timestamp: hrTimeToMillis(event.time) };
+  
+  // Process events array
+  const { transformed: eventsTransformed, bigAttributes: eventsBig } = processArrayWithAttributes(
+    transformed.events,
+    (event: any) => {
+      const eventTransformed = { ...event };
+      // Convert event.time to timestamp
+      if (Array.isArray(event.time) && event.time.length === 2) {
+        const { time, ...rest } = eventTransformed;
+        eventTransformed.timestamp = hrTimeToMillis(time as [number, number]);
+        delete eventTransformed.time;
       }
-      return event;
-    });
+      // Process event attributes
+      const { truncated: eventAttrsTruncated, bigAttributes: eventAttrsBig } = processAttributes(eventTransformed.attributes);
+      eventTransformed.attributes = eventAttrsTruncated;
+      return {
+        transformed: eventTransformed,
+        bigAttributes: eventAttrsBig
+      };
+    }
+  );
+  transformed.events = eventsTransformed;
+  if (eventsBig.length > 0) {
+    unindexedBigAttributes.events = eventsBig;
   }
+  
+  // Process resource attributes
+  if (transformed.resource?.attributes) {
+    const { truncated: resourceAttrsTruncated, bigAttributes: resourceAttrsBig } = processAttributes(transformed.resource.attributes);
+    transformed.resource.attributes = resourceAttrsTruncated;
+    if (hasKeys(resourceAttrsBig)) {
+      unindexedBigAttributes.resource = { attributes: resourceAttrsBig };
+    }
+  }
+  
+  // Process links array
+  const { transformed: linksTransformed, bigAttributes: linksBig } = processArrayWithAttributes(
+    transformed.links,
+    (link: any) => {
+      const { truncated: linkAttrsTruncated, bigAttributes: linkAttrsBig } = processAttributes(link?.attributes);
+      return {
+        transformed: { ...link, attributes: linkAttrsTruncated },
+        bigAttributes: hasKeys(linkAttrsBig) ? linkAttrsBig : undefined
+      };
+    }
+  );
+  transformed.links = linksTransformed;
+  if (linksBig.length > 0) {
+    unindexedBigAttributes.links = linksBig;
+  }
+  
+  // Store unindexed big attributes if any were found
+  if (hasKeys(unindexedBigAttributes)) {
+    transformed.unindexed_attributes = unindexedBigAttributes;
+  }
+  
   return transformed;
 }
 
 // Transform example document for Elasticsearch (convert spans array with HrTime tuples)
 function transformExampleForEs(doc: any): any {
   const transformed = { ...doc };
+  
   // Transform spans array if present
   if (Array.isArray(transformed.spans)) {
-    transformed.spans = transformed.spans.map((span: any) => {
-      return transformSpanForEs(span);
-    });
+    transformed.spans = transformed.spans.map((span: any) => transformSpanForEs(span));
   }
+  
+  // Process example-level attributes
+  const { truncated: attrsTruncated, bigAttributes: attrsBig } = processAttributes(transformed.attributes);
+  transformed.attributes = attrsTruncated;
+  if (hasKeys(attrsBig)) {
+    transformed.unindexed_attributes = { attributes: attrsBig };
+  }
+  
   return transformed;
 }
 
@@ -248,18 +423,18 @@ async function bulkInsert<T>(indexName: string, documents: T[], transformFn?: (d
       if (action[operation].error) {
         erroredDocuments.push({
           operation,
-          document: documents[Math.floor(i / 2)],
+        //   document: documents[Math.floor(i / 2)],
           error: action[operation].error
         });
       }
     });
     if (erroredDocuments.length > 0) {
-      throw new Error(`Bulk insert errors: ${JSON.stringify(erroredDocuments, null, 2)}`);
+      throw new Error(`Bulk insert errors: ${JSON.stringify(erroredDocuments, null, 2).slice(0, 1000)}...`);
     }
   }
 }
 
-// Generic search function wrapper
+/**Generic search function wrapper. This is the function for getting entities from Elasticsearch. */
 async function searchEntities<T>(
   indexName: string,
   searchQuery?: SearchQuery | string | null,
@@ -270,15 +445,31 @@ async function searchEntities<T>(
   if (!client) {
     throw new Error('Elasticsearch client not initialized.');
   }
+  return searchEntitiesEs<T>(client, indexName, searchQuery, filters, limit, offset);
+}
 
-  return searchEntitiesEs<T>(
-    client,
-    indexName,
-    searchQuery,
-    filters,
-    limit,
-    offset
-  );
+/**
+ * Check if an error is a 404 (not found) error.
+ */
+function isNotFoundError(error: any): boolean {
+  return error.meta?.statusCode === 404;
+}
+
+/**
+ * Get indices that have a given alias, excluding the specified index.
+ */
+async function getOtherIndicesWithAlias(alias: string, excludeIndex: string): Promise<string[]> {
+  if (!client) throw new Error('Elasticsearch client not initialized.');
+  
+  try {
+    const aliasIndices = await client.indices.getAlias({ name: alias });
+    if (aliasIndices && typeof aliasIndices === 'object' && !Array.isArray(aliasIndices)) {
+      return Object.keys(aliasIndices).filter(i => i !== excludeIndex);
+    }
+  } catch (error: any) {
+    if (!isNotFoundError(error)) throw error;
+  }
+  return [];
 }
 
 // Also ensure index aliases exist and point to the correct indices
@@ -295,31 +486,13 @@ async function ensureAlias(index: string, alias: string): Promise<void> {
   // Check if alias already points to this index
   try {
     const aliasExists = await client.indices.existsAlias({ name: alias, index });
-    if (aliasExists) {
-      return; // Alias already correctly configured
-    }
+    if (aliasExists) return; // Alias already correctly configured
   } catch (error: any) {
-    // If existsAlias throws (e.g., alias doesn't exist), continue to set it up
-    // Only rethrow if it's not a 404 (not found) error
-    if (error.meta?.statusCode && error.meta.statusCode !== 404) {
-      throw error;
-    }
+    if (!isNotFoundError(error)) throw error;
   }
   
-  // Get current alias assignments to remove them from other indices if needed
-  let indicesWithAlias: string[] = [];
-  try {
-    const aliasIndices = await client.indices.getAlias({ name: alias });
-    if (aliasIndices && typeof aliasIndices === 'object' && !Array.isArray(aliasIndices)) {
-      indicesWithAlias = Object.keys(aliasIndices).filter(i => i !== index);
-    }
-  } catch (error: any) {
-    // If alias doesn't exist (404), that's fine - we'll create it
-    // Only rethrow if it's not a 404 error
-    if (error.meta?.statusCode && error.meta.statusCode !== 404) {
-      throw error;
-    }
-  }
+  // Get indices that currently have this alias (excluding our target index)
+  const indicesWithAlias = await getOtherIndicesWithAlias(alias, index);
   
   // Build actions: remove alias from other indices, then add to target index
   const actions: any[] = [];
@@ -329,11 +502,47 @@ async function ensureAlias(index: string, alias: string): Promise<void> {
   actions.push({ add: { index, alias } });
   
   // Update aliases atomically
-  await client.indices.updateAliases({
-    body: { actions }
-  });
+  await client.indices.updateAliases({ body: { actions } });
 }
   
+/**
+ * Apply migration to add unindexed_attributes field to an index if it doesn't exist.
+ */
+async function migrationAddUnindexedAttributesToIndex(indexName: string): Promise<void> {
+  if (!client) {
+    throw new Error('Elasticsearch client not initialized.');
+  }
+
+  const indexExists = await client.indices.exists({ index: indexName });
+  if (!indexExists) return;
+
+  try {
+    const currentMapping = await client.indices.getMapping({ index: indexName });
+    const mappingKey = Object.keys(currentMapping)[0];
+    const properties = currentMapping[mappingKey]?.mappings?.properties;
+    
+    if (!properties?.unindexed_attributes) {
+      const unindexedMapping: any = { type: 'object', enabled: false };
+      await client.indices.putMapping({
+        index: indexName,
+        properties: { unindexed_attributes: unindexedMapping }
+      });
+      console.log(`Added unindexed_attributes field to ${indexName}`);
+    }
+  } catch (error: any) {
+    console.warn(`Could not apply migration to ${indexName}:`, error.message);
+  }
+}
+
+/**
+ * Apply migrations to Elasticsearch indices. Safe to call multiple times.
+ * Updates mappings for existing indices.
+ */
+async function applyMigrations(): Promise<void> {
+  await migrationAddUnindexedAttributesToIndex(SPAN_INDEX);
+  await migrationAddUnindexedAttributesToIndex(DATASET_EXAMPLES_INDEX);
+}
+
 /**
  * Create Elasticsearch indices with mappings. Safe to call multiple times (skips if index exists).
  * Call during application startup.
@@ -346,6 +555,9 @@ export async function createIndices(): Promise<void> {
  
   await ensureAlias(SPAN_INDEX, SPAN_INDEX_ALIAS);
   await ensureAlias(DATASET_EXAMPLES_INDEX, DATASET_EXAMPLES_INDEX_ALIAS);
+  
+  // Apply migrations after indices are created/updated
+  await applyMigrations();
 }
 
 /**
@@ -394,16 +606,12 @@ export async function searchExamples(
   offset: number = 0
 ): Promise<{ hits: Example[]; total: number }> {
   const filters: Record<string, string> = {};
-  if (organisationId) {
-    filters.organisation = organisationId;
-  }
-  if (datasetId) {
-    filters.dataset = datasetId;
-  }
+  if (organisationId) filters.organisation = organisationId;
+  if (datasetId) filters.dataset = datasetId;
   return searchEntities<Example>(
     DATASET_EXAMPLES_INDEX_ALIAS,
     searchQuery,
-    Object.keys(filters).length > 0 ? filters : undefined,
+    hasKeys(filters) ? filters : undefined,
     limit,
     offset
   );

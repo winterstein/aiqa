@@ -12,7 +12,7 @@ from typing import List, Dict, Any, Optional
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("AIQA")
 
 
 class AIQASpanExporter(SpanExporter):
@@ -273,12 +273,12 @@ class AIQASpanExporter(SpanExporter):
                         # Put spans back for retry
                         self._prepend_spans_to_buffer(spans_to_flush)
                     raise
-                logger.error(f"Error flushing spans to server: {error}", exc_info=True)
+                logger.error(f"Error flushing spans to server: {error}")
                 # Put spans back for retry
                 self._prepend_spans_to_buffer(spans_to_flush)
                 raise
             except Exception as error:
-                logger.error(f"Error flushing spans to server: {error}", exc_info=True)
+                logger.error(f"Error flushing spans to server: {error}")
                 # Put spans back for retry
                 self._prepend_spans_to_buffer(spans_to_flush)
                 if self.shutdown_requested:
@@ -307,7 +307,7 @@ class AIQASpanExporter(SpanExporter):
                     logger.debug(f"Auto-flush cycle #{cycle_count} completed, sleeping {self.flush_interval_ms / 1000.0}s")
                     time.sleep(self.flush_interval_ms / 1000.0)
                 except Exception as e:
-                    logger.error(f"Error in auto-flush cycle #{cycle_count}: {e}", exc_info=True)
+                    logger.error(f"Error in auto-flush cycle #{cycle_count}: {e}")
                     logger.debug(f"Auto-flush cycle #{cycle_count} error handled, sleeping {self.flush_interval_ms / 1000.0}s")
                     time.sleep(self.flush_interval_ms / 1000.0)
             
@@ -364,10 +364,10 @@ class AIQASpanExporter(SpanExporter):
                 else:
                     logger.warning(f"_send_spans() interrupted by interpreter shutdown: {e}")
                 raise
-            logger.error(f"_send_spans() RuntimeError: {type(e).__name__}: {e}", exc_info=True)
+            logger.error(f"_send_spans() RuntimeError: {type(e).__name__}: {e}")
             raise
         except Exception as e:
-            logger.error(f"_send_spans() exception: {type(e).__name__}: {e}", exc_info=True)
+            logger.error(f"_send_spans() exception: {type(e).__name__}: {e}")
             raise
 
     def _send_spans_sync(self, spans: List[Dict[str, Any]]) -> None:
@@ -396,7 +396,7 @@ class AIQASpanExporter(SpanExporter):
                 )
             logger.debug(f"_send_spans_sync() successfully sent {len(spans)} spans")
         except Exception as e:
-            logger.error(f"_send_spans_sync() exception: {type(e).__name__}: {e}", exc_info=True)
+            logger.error(f"_send_spans_sync() exception: {type(e).__name__}: {e}")
             raise
 
     def shutdown(self) -> None:
@@ -444,7 +444,7 @@ class AIQASpanExporter(SpanExporter):
                         # Clear their keys from tracking set to free memory
                         self._remove_span_keys_from_tracking(spans_to_flush)
                     except Exception as e:
-                        logger.error(f"shutdown() failed to send spans: {e}", exc_info=True)
+                        logger.error(f"shutdown() failed to send spans: {e}")
                         # Spans already removed, but process is exiting anyway
                         logger.warning(f"shutdown() {len(spans_to_flush)} span(s) were not sent due to error")
                         # Keys will remain in tracking set, but process is exiting so memory will be freed

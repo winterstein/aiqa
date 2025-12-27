@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { setTokenGetter } from '../api';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import '../custom.css';
+import '../utils/animations.css';
+import '../components/CelebrationModal.css';
 import LoginPage from './LoginPage';
 import OrganisationPage from './OrganisationPage';
 import OrganisationListPage from './OrganisationListPage';
@@ -94,7 +96,9 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/" replace />;
+    // Redirect to website if not authenticated
+    window.location.href = 'https://www-aiqa.winterwell.com';
+    return null;
   }
 
   return <Layout>{children}</Layout>;

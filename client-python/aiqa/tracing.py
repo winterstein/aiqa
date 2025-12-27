@@ -17,7 +17,7 @@ from .aiqa_exporter import AIQASpanExporter
 from .client import get_aiqa_client, AIQA_TRACER_NAME, get_component_tag, set_component_tag as _set_component_tag, get_aiqa_tracer
 from .object_serialiser import serialize_for_span
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("AIQA")
 
 
 async def flush_tracing() -> None:
@@ -47,7 +47,7 @@ async def shutdown_tracing() -> None:
         if client.get("exporter"):
             client["exporter"].shutdown()  # Synchronous method
     except Exception as e:
-        logger.error(f"Error shutting down tracing: {e}", exc_info=True)
+        logger.error(f"Error shutting down tracing: {e}")
 
 
 # Export provider and exporter accessors for advanced usage
@@ -56,7 +56,7 @@ __all__ = [
     "get_provider", "get_exporter", "flush_tracing", "shutdown_tracing", "WithTracing",
     "set_span_attribute", "set_span_name", "get_active_span",
     "get_trace_id", "get_span_id", "create_span_from_trace_id", "inject_trace_context", "extract_trace_context",
-    "set_conversation_id", "set_component_tag", "set_token_usage", "set_provider_and_model"
+    "set_conversation_id", "set_component_tag", "set_token_usage", "set_provider_and_model", "submit_feedback"
 ]
 
 
@@ -239,8 +239,11 @@ def _extract_and_set_token_usage(span: trace.Span, result: Any) -> None:
         try:
             if isinstance(result, dict):
                 usage = result.get("usage")
-                # Also check if result itself is a usage dict
+                # Also check if result itself is a usage dict (OpenAI format)
                 if usage is None and all(key in result for key in ("prompt_tokens", "completion_tokens", "total_tokens")):
+                    usage = result
+                # Also check if result itself is a usage dict (Bedrock format)
+                elif usage is None and all(key in result for key in ("input_tokens", "output_tokens")):
                     usage = result
             
             # Check if result has a 'usage' attribute (e.g., OpenAI response object)
@@ -253,9 +256,22 @@ def _extract_and_set_token_usage(span: trace.Span, result: Any) -> None:
         # Extract token usage if found
         if isinstance(usage, dict):
             try:
-                prompt_tokens = usage.get("prompt_tokens")
-                completion_tokens = usage.get("completion_tokens")
-                total_tokens = usage.get("total_tokens")
+                # Support both OpenAI format (prompt_tokens/completion_tokens) and Bedrock format (input_tokens/output_tokens)
+                prompt_tokens = usage.get("prompt_tokens") or usage.get("PromptTokens")
+                completion_tokens = usage.get("completion_tokens") or usage.get("CompletionTokens")
+                input_tokens = usage.get("input_tokens") or usage.get("InputTokens")
+                output_tokens = usage.get("output_tokens") or usage.get("OutputTokens")
+                total_tokens = usage.get("total_tokens") or usage.get("TotalTokens")
+                
+                # Use Bedrock format if OpenAI format not available
+                if prompt_tokens is None:
+                    prompt_tokens = input_tokens
+                if completion_tokens is None:
+                    completion_tokens = output_tokens
+                
+                # Calculate total_tokens if not provided but we have input and output
+                if total_tokens is None and prompt_tokens is not None and completion_tokens is not None:
+                    total_tokens = prompt_tokens + completion_tokens
                 
                 # Only set attributes that are not already set
                 if prompt_tokens is not None and not _is_attribute_set(span, "gen_ai.usage.input_tokens"):
@@ -266,10 +282,10 @@ def _extract_and_set_token_usage(span: trace.Span, result: Any) -> None:
                     span.set_attribute("gen_ai.usage.total_tokens", total_tokens)
             except Exception:
                 # If setting attributes fails, log but don't raise
-                logger.debug(f"Failed to set token usage attributes on span", exc_info=True)
+                logger.debug(f"Failed to set token usage attributes on span")
     except Exception:
         # Catch any other exceptions to ensure this never derails tracing
-        logger.debug(f"Error in _extract_and_set_token_usage", exc_info=True)
+        logger.debug(f"Error in _extract_and_set_token_usage")
 
 
 def _extract_and_set_provider_and_model(span: trace.Span, result: Any) -> None:
@@ -348,10 +364,10 @@ def _extract_and_set_provider_and_model(span: trace.Span, result: Any) -> None:
                     span.set_attribute("gen_ai.provider.name", provider_str)
         except Exception:
             # If setting attributes fails, log but don't raise
-            logger.debug(f"Failed to set provider/model attributes on span", exc_info=True)
+            logger.debug(f"Failed to set provider/model attributes on span")
     except Exception:
         # Catch any other exceptions to ensure this never derails tracing
-        logger.debug(f"Error in _extract_and_set_provider_and_model", exc_info=True)
+        logger.debug(f"Error in _extract_and_set_provider_and_model")
 
 
 class TracedGenerator:
@@ -833,7 +849,7 @@ def set_token_usage(
             span.set_attribute("gen_ai.usage.total_tokens", total_tokens)
             set_count += 1
     except Exception as e:
-        logger.warning(f"Failed to set token usage attributes: {e}", exc_info=True)
+        logger.warning(f"Failed to set token usage attributes: {e}")
         return False
     
     return set_count > 0
@@ -882,7 +898,7 @@ def set_provider_and_model(
             span.set_attribute("gen_ai.request.model", str(model))
             set_count += 1
     except Exception as e:
-        logger.warning(f"Failed to set provider/model attributes: {e}", exc_info=True)
+        logger.warning(f"Failed to set provider/model attributes: {e}")
         return False
     
     return set_count > 0
@@ -1024,7 +1040,7 @@ def create_span_from_trace_id(
         
         return span
     except (ValueError, AttributeError) as e:
-        logger.error(f"Error creating span from trace_id: {e}", exc_info=True)
+        logger.error(f"Error creating span from trace_id: {e}")
         # Fallback: create a new span
         tracer = get_aiqa_tracer()
         span = tracer.start_span(span_name)
@@ -1052,7 +1068,7 @@ def inject_trace_context(carrier: dict) -> None:
     try:
         inject(carrier)
     except Exception as e:
-        logger.warning(f"Error injecting trace context: {e}", exc_info=True)
+        logger.warning(f"Error injecting trace context: {e}")
 
 
 def extract_trace_context(carrier: dict) -> Any:
@@ -1086,6 +1102,59 @@ def extract_trace_context(carrier: dict) -> Any:
     try:
         return extract(carrier)
     except Exception as e:
-        logger.warning(f"Error extracting trace context: {e}", exc_info=True)
+        logger.warning(f"Error extracting trace context: {e}")
         return None
+
+
+async def submit_feedback(
+    trace_id: str,
+    thumbs_up: Optional[bool] = None,
+    comment: Optional[str] = None,
+) -> None:
+    """
+    Submit feedback for a trace by creating a new span with the same trace ID.
+    This allows you to add feedback (thumbs-up, thumbs-down, comment) to a trace after it has completed.
+    
+    Args:
+        trace_id: The trace ID as a hexadecimal string (32 characters)
+        thumbs_up: True for positive feedback, False for negative feedback, None for neutral
+        comment: Optional text comment
+    
+    Example:
+        from aiqa import submit_feedback
+        
+        # Submit positive feedback
+        await submit_feedback('abc123...', thumbs_up=True, comment='Great response!')
+        
+        # Submit negative feedback
+        await submit_feedback('abc123...', thumbs_up=False, comment='Incorrect answer')
+    """
+    if not trace_id or len(trace_id) != 32:
+        raise ValueError('Invalid trace ID: must be 32 hexadecimal characters')
+    
+    # Create a span for feedback with the same trace ID
+    span = create_span_from_trace_id(trace_id, span_name='feedback')
+    
+    try:
+        # Set feedback attributes
+        if thumbs_up is not None:
+            span.set_attribute('feedback.thumbs_up', thumbs_up)
+            span.set_attribute('feedback.type', 'positive' if thumbs_up else 'negative')
+        else:
+            span.set_attribute('feedback.type', 'neutral')
+        
+        if comment:
+            span.set_attribute('feedback.comment', comment)
+        
+        # Mark as feedback span
+        span.set_attribute('aiqa.span_type', 'feedback')
+        
+        # End the span
+        span.end()
+        
+        # Flush to ensure it's sent immediately
+        await flush_tracing()
+    except Exception as e:
+        span.end()
+        raise e
 

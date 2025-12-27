@@ -28,6 +28,96 @@ if (process.env.AIQA_SAMPLING_RATE) {
 // Component tag to add to all spans (can be set via AIQA_COMPONENT_TAG env var or programmatically)
 let componentTag: string = process.env.AIQA_COMPONENT_TAG || "";
 
+// Data filters configuration
+function getEnabledFilters(): Set<string> {
+	const filtersEnv = process.env.AIQA_DATA_FILTERS || "RemovePasswords, RemoveJWT";
+	if (!filtersEnv) {
+		return new Set();
+	}
+	return new Set(filtersEnv.split(',').map(f => f.trim()).filter(f => f));
+}
+
+function isJWTToken(value: any): boolean {
+	if (typeof value !== 'string') {
+		return false;
+	}
+	// JWT tokens have format: header.payload.signature (3 parts separated by dots)
+	// They typically start with "eyJ" (base64 encoded '{"')
+	const parts = value.split('.');
+	return parts.length === 3 && value.startsWith('eyJ') && parts.every(p => p.length > 0);
+}
+
+function isAPIKey(value: any): boolean {
+	if (typeof value !== 'string') {
+		return false;
+	}
+	const trimmed = value.trim();
+	// Common API key prefixes
+	const apiKeyPrefixes = ['sk-', 'pk-', 'AKIA', 'ghp_', 'gho_', 'ghu_', 'ghs_', 'ghr_'];
+	return apiKeyPrefixes.some(prefix => trimmed.startsWith(prefix));
+}
+
+function applyDataFilters(key: string, value: any): any {
+	// Don't filter falsy values
+	if (!value) {
+		return value;
+	}
+	
+	const enabledFilters = getEnabledFilters();
+	const keyLower = key.toLowerCase();
+	
+	// RemovePasswords filter: if key contains "password", replace value with "****"
+	if (enabledFilters.has('RemovePasswords') && keyLower.includes('password')) {
+		return '****';
+	}
+	
+	// RemoveJWT filter: if value looks like a JWT token, replace with "****"
+	if (enabledFilters.has('RemoveJWT') && isJWTToken(value)) {
+		return '****';
+	}
+	
+	// RemoveAuthHeaders filter: if key is "authorization" (case-insensitive), replace value with "****"
+	if (enabledFilters.has('RemoveAuthHeaders') && keyLower === 'authorization') {
+		return '****';
+	}
+	
+	// RemoveAPIKeys filter: if key contains API key patterns or value looks like an API key
+	if (enabledFilters.has('RemoveAPIKeys')) {
+		// Check key patterns
+		const apiKeyKeyPatterns = ['api_key', 'apikey', 'api-key', 'apikey'];
+		if (apiKeyKeyPatterns.some(pattern => keyLower.includes(pattern))) {
+			return '****';
+		}
+		// Check value patterns
+		if (isAPIKey(value)) {
+			return '****';
+		}
+	}
+	
+	return value;
+}
+
+function filterDataRecursive(data: any): any {
+	if (data == null) {
+		return data;
+	}
+	
+	if (Array.isArray(data)) {
+		return data.map(item => filterDataRecursive(item));
+	}
+	
+	if (typeof data === 'object') {
+		const result: any = {};
+		for (const [k, v] of Object.entries(data)) {
+			const filteredValue = applyDataFilters(k, v);
+			result[k] = filterDataRecursive(filteredValue);
+		}
+		return result;
+	}
+	
+	return applyDataFilters('', data);
+}
+
 // Initialize OpenTelemetry with AIQA exporter
 const aiqaServerUrl = process.env.AIQA_SERVER_URL;
 const exporter = new AIQASpanExporter(aiqaServerUrl);
@@ -135,7 +225,7 @@ export function withTracingAsync(fn: Function, options: TracingOptions = {}) {
 	const { name, ignoreInput, ignoreOutput, filterInput, filterOutput } = options;
 	let fnName = name || fn.name || "_";
 	if ((fn as any)._isTraced) {
-		console.warn('Function ' + fnName + ' is already traced, skipping tracing again');
+		console.warn('AIQA: Function ' + fnName + ' is already traced, skipping tracing again');
 		return fn;
 	}
 	const tracedFn = async (...args: any[]) => {
@@ -160,12 +250,13 @@ export function withTracingAsync(fn: Function, options: TracingOptions = {}) {
 			// TODO make a copy of input removing fields in ignoreInput
 		}
 		if (input != null) {
-			span.setAttribute('input', input);
+			const filteredInput = filterDataRecursive(input);
+			span.setAttribute('input', filteredInput);
 		}
 		try {
 			// call the function
 			const traceId = span.spanContext().traceId;
-			console.log('do traceable stuff', { fnName, traceId });
+			console.log('AIQA: do traceable stuff', { fnName, traceId });
 			const curriedFn = () => fn(...args)
 			const result = await context.with(trace.setSpan(context.active(), span), curriedFn);
 			// Trace output
@@ -180,7 +271,8 @@ export function withTracingAsync(fn: Function, options: TracingOptions = {}) {
 			extractAndSetTokenUsage(span, output);
 			// Extract and set provider/model before setting output
 			extractAndSetProviderAndModel(span, output);
-			span.setAttribute('output', output);
+			const filteredOutput = filterDataRecursive(output);
+			span.setAttribute('output', filteredOutput);
 
 			return result;
 		} catch (exception) {
@@ -193,7 +285,7 @@ export function withTracingAsync(fn: Function, options: TracingOptions = {}) {
 		}
 	};
 	tracedFn._isTraced = true; // avoid double wrapping
-	console.log('Function ' + fnName + ' is now traced');
+	console.log('AIQA: Function ' + fnName + ' is now traced');
 	return tracedFn;
 }
 
@@ -206,7 +298,7 @@ export function withTracing(fn: Function, options: TracingOptions = {}) {
 	const { name, ignoreInput, ignoreOutput, filterInput, filterOutput } = options;
 	let fnName = name || fn.name || "_";
 	if ((fn as any)._isTraced) {
-		console.warn('Function ' + fnName + ' is already traced, skipping tracing again');
+		console.warn('AIQA: Function ' + fnName + ' is already traced, skipping tracing again');
 		return fn;
 	}
 	const tracedFn = (...args: any[]) => {
@@ -231,12 +323,13 @@ export function withTracing(fn: Function, options: TracingOptions = {}) {
 			// TODO make a copy of input removing fields in ignoreInput
 		}
 		if (input != null) {
-			span.setAttribute('input', input);
+			const filteredInput = filterDataRecursive(input);
+			span.setAttribute('input', filteredInput);
 		}
 		try {
 			// call the function
 			const traceId = span.spanContext().traceId;
-			console.log('do traceable stuff', { fnName, traceId });
+			console.log('AIQA: do traceable stuff', { fnName, traceId });
 			const curriedFn = () => fn(...args)
 			const result = context.with(trace.setSpan(context.active(), span), curriedFn);
 			// Trace output
@@ -251,7 +344,8 @@ export function withTracing(fn: Function, options: TracingOptions = {}) {
 			extractAndSetTokenUsage(span, output);
 			// Extract and set provider/model before setting output
 			extractAndSetProviderAndModel(span, output);
-			span.setAttribute('output', output);
+			const filteredOutput = filterDataRecursive(output);
+			span.setAttribute('output', filteredOutput);
 
 			return result;
 		} catch (exception) {
@@ -264,7 +358,7 @@ export function withTracing(fn: Function, options: TracingOptions = {}) {
 		}
 	};
 	tracedFn._isTraced = true; // avoid double wrapping
-	console.log('Function ' + fnName + ' is now traced');
+	console.log('AIQA: Function ' + fnName + ' is now traced');
 	return tracedFn;
 }
 
@@ -273,7 +367,8 @@ export function withTracing(fn: Function, options: TracingOptions = {}) {
 export function setSpanAttribute(attributeName: string, attributeValue: any) {
 	let span = trace.getActiveSpan();
 	if (span) {
-		span.setAttribute(attributeName, attributeValue);
+		const filteredValue = filterDataRecursive(attributeValue);
+		span.setAttribute(attributeName, filteredValue);
 		return true
 	}
 	return false; // no span found
@@ -329,10 +424,16 @@ function extractAndSetTokenUsage(span: any, result: any): void {
 				} else if ('Usage' in result) {
 					usage = result.Usage;
 				} else {
-					// Check if result itself is a usage dict
+					// Check if result itself is a usage dict (OpenAI format)
 					if ('prompt_tokens' in result && 'completion_tokens' in result && 'total_tokens' in result) {
 						usage = result;
 					} else if ('PromptTokens' in result && 'CompletionTokens' in result && 'TotalTokens' in result) {
+						usage = result;
+					} else if ('input_tokens' in result && 'output_tokens' in result) {
+						// Bedrock format
+						usage = result;
+					} else if ('InputTokens' in result && 'OutputTokens' in result) {
+						// Bedrock format (capitalized)
 						usage = result;
 					}
 				}
@@ -345,9 +446,25 @@ function extractAndSetTokenUsage(span: any, result: any): void {
 		// Extract token usage if found
 		if (usage && typeof usage === 'object') {
 			try {
-				const promptTokens = usage.prompt_tokens ?? usage.PromptTokens;
-				const completionTokens = usage.completion_tokens ?? usage.CompletionTokens;
-				const totalTokens = usage.total_tokens ?? usage.TotalTokens;
+				// Support both OpenAI format (prompt_tokens/completion_tokens) and Bedrock format (input_tokens/output_tokens)
+				let promptTokens = usage.prompt_tokens ?? usage.PromptTokens;
+				let completionTokens = usage.completion_tokens ?? usage.CompletionTokens;
+				const inputTokens = usage.input_tokens ?? usage.InputTokens;
+				const outputTokens = usage.output_tokens ?? usage.OutputTokens;
+				let totalTokens = usage.total_tokens ?? usage.TotalTokens;
+				
+				// Use Bedrock format if OpenAI format not available
+				if (promptTokens == null) {
+					promptTokens = inputTokens;
+				}
+				if (completionTokens == null) {
+					completionTokens = outputTokens;
+				}
+				
+				// Calculate total_tokens if not provided but we have input and output
+				if (totalTokens == null && promptTokens != null && completionTokens != null) {
+					totalTokens = Number(promptTokens) + Number(completionTokens);
+				}
 				
 				// Only set attributes that are not already set
 				if (promptTokens != null && !isAttributeSet(span, 'gen_ai.usage.input_tokens')) {
@@ -361,12 +478,12 @@ function extractAndSetTokenUsage(span: any, result: any): void {
 				}
 			} catch (e) {
 				// If setting attributes fails, log but don't raise
-				console.debug('Failed to set token usage attributes on span', e);
+				console.debug('AIQA: Failed to set token usage attributes on span', e);
 			}
 		}
 	} catch (e) {
 		// Catch any other exceptions to ensure this never derails tracing
-		console.debug('Error in extractAndSetTokenUsage', e);
+		console.debug('AIQA: Error in extractAndSetTokenUsage', e);
 	}
 }
 
@@ -427,7 +544,7 @@ function extractAndSetProviderAndModel(span: any, result: any): void {
 					span.setAttribute('gen_ai.request.model', modelStr);
 				}
 			} catch (e) {
-				console.debug('Failed to set model attribute on span', e);
+				console.debug('AIQA: Failed to set model attribute on span', e);
 			}
 		}
 		
@@ -438,12 +555,12 @@ function extractAndSetProviderAndModel(span: any, result: any): void {
 					span.setAttribute('gen_ai.provider.name', providerStr);
 				}
 			} catch (e) {
-				console.debug('Failed to set provider attribute on span', e);
+				console.debug('AIQA: Failed to set provider attribute on span', e);
 			}
 		}
 	} catch (e) {
 		// Catch any other exceptions to ensure this never derails tracing
-		console.debug('Error in extractAndSetProviderAndModel', e);
+		console.debug('AIQA: Error in extractAndSetProviderAndModel', e);
 	}
 }
 
@@ -525,7 +642,7 @@ export function setTokenUsage(
 			setCount++;
 		}
 	} catch (e) {
-		console.warn('Failed to set token usage attributes:', e);
+		console.warn('AIQA: Failed to set token usage attributes:', e);
 		return false;
 	}
 	
@@ -573,7 +690,7 @@ export function setProviderAndModel(
 			setCount++;
 		}
 	} catch (e) {
-		console.warn('Failed to set provider/model attributes:', e);
+		console.warn('AIQA: Failed to set provider/model attributes:', e);
 		return false;
 	}
 	
@@ -701,7 +818,7 @@ export function createSpanFromTraceId(
 		
 		return span;
 	} catch (error) {
-		console.error('Error creating span from trace_id:', error);
+		console.error('AIQA: Error creating span from trace_id:', error instanceof Error ? error.message : String(error));
 		// Fallback: create a new span
 		const span = tracer.startSpan(spanName);
 		if (componentTag) {
@@ -730,7 +847,7 @@ export function injectTraceContext(carrier: Record<string, string>): void {
 	try {
 		propagation.inject(context.active(), carrier);
 	} catch (error) {
-		console.warn('Error injecting trace context:', error);
+		console.warn('AIQA: Error injecting trace context:', error);
 	}
 }
 
@@ -758,7 +875,69 @@ export function extractTraceContext(carrier: Record<string, string>) {
 	try {
 		return propagation.extract(context.active(), carrier);
 	} catch (error) {
-		console.warn('Error extracting trace context:', error);
+		console.warn('AIQA: Error extracting trace context:', error);
 		return context.active();
 	}
+}
+
+/**
+ * Submit feedback for a trace by creating a new span with the same trace ID.
+ * This allows you to add feedback (thumbs-up, thumbs-down, comment) to a trace after it has completed.
+ * 
+ * @param traceId - The trace ID as a hexadecimal string (32 characters)
+ * @param feedback - Feedback object with:
+ *   - thumbsUp: true for positive feedback, false for negative feedback, undefined for neutral
+ *   - comment: Optional text comment
+ * @returns Promise that resolves when the feedback span has been created and flushed
+ * 
+ * @example
+ * ```typescript
+ * import { submitFeedback } from './src/tracing';
+ * 
+ * // Submit positive feedback
+ * await submitFeedback('abc123...', { thumbsUp: true, comment: 'Great response!' });
+ * 
+ * // Submit negative feedback
+ * await submitFeedback('abc123...', { thumbsUp: false, comment: 'Incorrect answer' });
+ * ```
+ */
+export async function submitFeedback(
+	traceId: string,
+	feedback: { thumbsUp?: boolean; comment?: string }
+): Promise<void> {
+	if (!traceId || traceId.length !== 32) {
+		throw new Error('Invalid trace ID: must be 32 hexadecimal characters');
+	}
+
+	// Create a span for feedback with the same trace ID
+	const span = createSpanFromTraceId(traceId, undefined, 'feedback');
+	
+	// Use the span in context
+	return context.with(trace.setSpan(context.active(), span), async () => {
+		try {
+			// Set feedback attributes
+			if (feedback.thumbsUp !== undefined) {
+				span.setAttribute('feedback.thumbs_up', feedback.thumbsUp);
+				span.setAttribute('feedback.type', feedback.thumbsUp ? 'positive' : 'negative');
+			} else {
+				span.setAttribute('feedback.type', 'neutral');
+			}
+			
+			if (feedback.comment) {
+				span.setAttribute('feedback.comment', feedback.comment);
+			}
+			
+			// Mark as feedback span
+			span.setAttribute('aiqa.span_type', 'feedback');
+			
+			// End the span
+			span.end();
+			
+			// Flush to ensure it's sent immediately
+			await flushSpans();
+		} catch (error) {
+			span.end();
+			throw error;
+		}
+	});
 }

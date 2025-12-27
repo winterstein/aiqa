@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Bump this version when you make a change to the codebase
-VERSION="0.1.0"
+VERSION="0.1.1"
 
 # Ideally this should be auto-run (fiddly with git hooks)
 
@@ -46,6 +46,15 @@ if [ -f "$PYTHON_INIT_FILE" ]; then
     echo "Updated __version__ to $VERSION in $PYTHON_INIT_FILE"
 else
     echo "Warning: $PYTHON_INIT_FILE not found, skipping __version__ update"
+fi
+# Update Python pyproject.toml
+PYTHON_PYPROJECT_FILE="client-python/pyproject.toml"
+if [ -f "$PYTHON_PYPROJECT_FILE" ]; then
+    echo "Updating $PYTHON_PYPROJECT_FILE version"
+    sed -i "s/^version = \".*\"/version = \"$VERSION\"/" "$PYTHON_PYPROJECT_FILE"
+    echo "Updated version to $VERSION in $PYTHON_PYPROJECT_FILE"
+else
+    echo "Warning: $PYTHON_PYPROJECT_FILE not found, skipping version update"
 fi
 
 echo "Version info:"

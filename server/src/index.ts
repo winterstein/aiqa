@@ -49,7 +49,16 @@ import { addTokenCost } from './token_cost.js';
 dotenv.config();
 
 const fastify = Fastify({
-  logger: true,
+  logger: {
+    serializers: {
+      req: (req) => ({
+        method: req.method,
+        url: req.url,
+        // Explicitly exclude body to avoid logging giant request bodies
+      }),
+    },
+  },
+  bodyLimit: 200 * 1024 * 1024, // 200MB - allow large span payloads
 });
 
 // Initialize databases
@@ -70,6 +79,15 @@ const shutdown = async () => {
 
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
+
+// Log request body sizes for debugging
+fastify.addHook('onRequest', async (request, reply) => {
+  const contentLength = request.headers['content-length'];
+  if (contentLength) {
+    const sizeMB = (parseInt(contentLength) / (1024 * 1024)).toFixed(2);
+    fastify.log.info(`Request ${request.method} ${request.url} - Content-Length: ${contentLength} bytes (${sizeMB} MB)`);
+  }
+});
 
 // Health check
 fastify.get('/health', async () => {

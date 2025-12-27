@@ -426,13 +426,163 @@ func prepareOutput(results []reflect.Value, opt TracingOptions) interface{} {
 	return result
 }
 
+// getEnabledFilters returns a set of enabled filter names from AIQA_DATA_FILTERS env var
+func getEnabledFilters() map[string]bool {
+	filtersEnv := os.Getenv("AIQA_DATA_FILTERS")
+	if filtersEnv == "" {
+		filtersEnv = "RemovePasswords, RemoveJWT"
+	}
+	enabled := make(map[string]bool)
+	for _, f := range strings.Split(filtersEnv, ",") {
+		f = strings.TrimSpace(f)
+		if f != "" {
+			enabled[f] = true
+		}
+	}
+	return enabled
+}
+
+// isJWTToken checks if a value looks like a JWT token (starts with "eyJ" and has 3 parts separated by dots)
+func isJWTToken(value interface{}) bool {
+	str, ok := value.(string)
+	if !ok {
+		return false
+	}
+	// JWT tokens have format: header.payload.signature (3 parts separated by dots)
+	// They typically start with "eyJ" (base64 encoded '{"')
+	parts := strings.Split(str, ".")
+	return len(parts) == 3 && strings.HasPrefix(str, "eyJ") && len(parts[0]) > 0 && len(parts[1]) > 0 && len(parts[2]) > 0
+}
+
+// isAPIKey checks if a value looks like an API key based on common patterns
+func isAPIKey(value interface{}) bool {
+	str, ok := value.(string)
+	if !ok {
+		return false
+	}
+	str = strings.TrimSpace(str)
+	// Common API key prefixes
+	apiKeyPrefixes := []string{"sk-", "pk-", "AKIA", "ghp_", "gho_", "ghu_", "ghs_", "ghr_"}
+	for _, prefix := range apiKeyPrefixes {
+		if strings.HasPrefix(str, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// applyDataFilters applies data filters to a key-value pair based on enabled filters
+func applyDataFilters(key string, value interface{}) interface{} {
+	// Don't filter falsy values
+	if value == nil {
+		return value
+	}
+	
+	// Check if value is falsy (empty string, zero, false)
+	switch v := value.(type) {
+	case string:
+		if v == "" {
+			return value
+		}
+	case int:
+		if v == 0 {
+			return value
+		}
+	case int64:
+		if v == 0 {
+			return value
+		}
+	case float64:
+		if v == 0 {
+			return value
+		}
+	case bool:
+		if !v {
+			return value
+		}
+	}
+	
+	enabledFilters := getEnabledFilters()
+	keyLower := strings.ToLower(key)
+	
+	// RemovePasswords filter: if key contains "password", replace value with "****"
+	if enabledFilters["RemovePasswords"] && strings.Contains(keyLower, "password") {
+		return "****"
+	}
+	
+	// RemoveJWT filter: if value looks like a JWT token, replace with "****"
+	if enabledFilters["RemoveJWT"] && isJWTToken(value) {
+		return "****"
+	}
+	
+	// RemoveAuthHeaders filter: if key is "authorization" (case-insensitive), replace value with "****"
+	if enabledFilters["RemoveAuthHeaders"] && keyLower == "authorization" {
+		return "****"
+	}
+	
+	// RemoveAPIKeys filter: if key contains API key patterns or value looks like an API key
+	if enabledFilters["RemoveAPIKeys"] {
+		// Check key patterns
+		apiKeyKeyPatterns := []string{"api_key", "apikey", "api-key", "apikey"}
+		for _, pattern := range apiKeyKeyPatterns {
+			if strings.Contains(keyLower, pattern) {
+				return "****"
+			}
+		}
+		// Check value patterns
+		if isAPIKey(value) {
+			return "****"
+		}
+	}
+	
+	return value
+}
+
+// filterDataRecursive recursively applies data filters to nested structures
+func filterDataRecursive(data interface{}) interface{} {
+	if data == nil {
+		return data
+	}
+	
+	switch v := data.(type) {
+	case map[string]interface{}:
+		result := make(map[string]interface{})
+		for k, val := range v {
+			filteredVal := applyDataFilters(k, val)
+			result[k] = filterDataRecursive(filteredVal)
+		}
+		return result
+	case []interface{}:
+		result := make([]interface{}, len(v))
+		for i, item := range v {
+			result[i] = filterDataRecursive(item)
+		}
+		return result
+	default:
+		// For other types, try to convert to map if possible
+		// This handles structs and other complex types
+		jsonBytes, err := json.Marshal(v)
+		if err != nil {
+			return applyDataFilters("", v)
+		}
+		var jsonData interface{}
+		if err := json.Unmarshal(jsonBytes, &jsonData); err != nil {
+			return applyDataFilters("", v)
+		}
+		return filterDataRecursive(jsonData)
+	}
+}
+
 // serializeValue serializes a value to JSON string for span attributes
 func serializeValue(value interface{}) string {
+	// Apply data filters before serialization
+	filteredValue := filterDataRecursive(value)
+	
 	// Try JSON serialization first
-	jsonBytes, err := json.Marshal(value)
+	jsonBytes, err := json.Marshal(filteredValue)
 	if err != nil {
 		// Fallback to string representation
-		return fmt.Sprintf("%v", value)
+		return fmt.Sprintf("%v", filteredValue)
 	}
 	return string(jsonBytes)
 }
@@ -507,12 +657,17 @@ func extractAndSetTokenUsage(span trace.Span, result interface{}) {
 				usage = usageMap
 			}
 		} else {
-			// Check if result itself is a usage dict
+			// Check if result itself is a usage dict (OpenAI format)
 			if _, hasPrompt := resultMap["prompt_tokens"]; hasPrompt {
 				if _, hasCompletion := resultMap["completion_tokens"]; hasCompletion {
 					if _, hasTotal := resultMap["total_tokens"]; hasTotal {
 						usage = resultMap
 					}
+				}
+			} else if _, hasInput := resultMap["input_tokens"]; hasInput {
+				// Bedrock format
+				if _, hasOutput := resultMap["output_tokens"]; hasOutput {
+					usage = resultMap
 				}
 			}
 		}
@@ -551,10 +706,17 @@ func extractAndSetTokenUsage(span trace.Span, result interface{}) {
 	// Extract token usage if found
 	if usage != nil {
 		// Get token values safely
+		// Support both OpenAI format (prompt_tokens/completion_tokens) and Bedrock format (input_tokens/output_tokens)
 		var promptTokens, completionTokens, totalTokens interface{}
 		if val, ok := usage["prompt_tokens"]; ok {
 			promptTokens = val
 		} else if val, ok := usage["PromptTokens"]; ok {
+			promptTokens = val
+		} else if val, ok := usage["input_tokens"]; ok {
+			// Bedrock format
+			promptTokens = val
+		} else if val, ok := usage["InputTokens"]; ok {
+			// Bedrock format (capitalized)
 			promptTokens = val
 		}
 		
@@ -562,12 +724,41 @@ func extractAndSetTokenUsage(span trace.Span, result interface{}) {
 			completionTokens = val
 		} else if val, ok := usage["CompletionTokens"]; ok {
 			completionTokens = val
+		} else if val, ok := usage["output_tokens"]; ok {
+			// Bedrock format
+			completionTokens = val
+		} else if val, ok := usage["OutputTokens"]; ok {
+			// Bedrock format (capitalized)
+			completionTokens = val
 		}
 		
 		if val, ok := usage["total_tokens"]; ok {
 			totalTokens = val
 		} else if val, ok := usage["TotalTokens"]; ok {
 			totalTokens = val
+		}
+		
+		// Calculate total_tokens if not provided but we have input and output
+		if totalTokens == nil && promptTokens != nil && completionTokens != nil {
+			// Try to calculate total
+			var inputVal, outputVal float64
+			if inputInt, ok := promptTokens.(int); ok {
+				inputVal = float64(inputInt)
+			} else if inputInt64, ok := promptTokens.(int64); ok {
+				inputVal = float64(inputInt64)
+			} else if inputFloat, ok := promptTokens.(float64); ok {
+				inputVal = inputFloat
+			}
+			if outputInt, ok := completionTokens.(int); ok {
+				outputVal = float64(outputInt)
+			} else if outputInt64, ok := completionTokens.(int64); ok {
+				outputVal = float64(outputInt64)
+			} else if outputFloat, ok := completionTokens.(float64); ok {
+				outputVal = outputFloat
+			}
+			if inputVal > 0 && outputVal > 0 {
+				totalTokens = int(inputVal + outputVal)
+			}
 		}
 		
 		// Only set attributes that are not already set
@@ -908,5 +1099,64 @@ func InjectTraceContext(ctx context.Context, carrier map[string]string) {
 func ExtractTraceContext(ctx context.Context, carrier map[string]string) context.Context {
 	prop := otel.GetTextMapPropagator()
 	return prop.Extract(ctx, propagation.MapCarrier(carrier))
+}
+
+// FeedbackOptions contains options for submitting feedback
+type FeedbackOptions struct {
+	ThumbsUp *bool  // true for positive, false for negative, nil for neutral
+	Comment  string // Optional text comment
+}
+
+// SubmitFeedback submits feedback for a trace by creating a new span with the same trace ID.
+// This allows you to add feedback (thumbs-up, thumbs-down, comment) to a trace after it has completed.
+//
+// traceId: The trace ID as a hexadecimal string (32 characters)
+// feedback: Feedback options with ThumbsUp and Comment
+// Returns: Error if feedback could not be submitted
+//
+// Example:
+//   // Submit positive feedback
+//   thumbsUp := true
+//   err := SubmitFeedback(ctx, "abc123...", FeedbackOptions{
+//       ThumbsUp: &thumbsUp,
+//       Comment:  "Great response!",
+//   })
+//
+//   // Submit negative feedback
+//   thumbsDown := false
+//   err := SubmitFeedback(ctx, "abc123...", FeedbackOptions{
+//       ThumbsUp: &thumbsDown,
+//       Comment:  "Incorrect answer",
+//   })
+func SubmitFeedback(ctx context.Context, traceId string, feedback FeedbackOptions) error {
+	if len(traceId) != 32 {
+		return fmt.Errorf("invalid trace ID: must be 32 hexadecimal characters")
+	}
+
+	// Create a span for feedback with the same trace ID
+	ctx, span := CreateSpanFromTraceId(ctx, traceId, "", "feedback")
+	defer span.End()
+
+	// Set feedback attributes
+	if feedback.ThumbsUp != nil {
+		span.SetAttributes(attribute.Bool("feedback.thumbs_up", *feedback.ThumbsUp))
+		if *feedback.ThumbsUp {
+			span.SetAttributes(attribute.String("feedback.type", "positive"))
+		} else {
+			span.SetAttributes(attribute.String("feedback.type", "negative"))
+		}
+	} else {
+		span.SetAttributes(attribute.String("feedback.type", "neutral"))
+	}
+
+	if feedback.Comment != "" {
+		span.SetAttributes(attribute.String("feedback.comment", feedback.Comment))
+	}
+
+	// Mark as feedback span
+	span.SetAttributes(attribute.String("aiqa.span_type", "feedback"))
+
+	// Flush to ensure it's sent immediately
+	return FlushSpans(ctx)
 }
 
