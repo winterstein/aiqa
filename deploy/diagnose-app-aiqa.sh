@@ -1,13 +1,13 @@
 #!/bin/bash
-# Diagnostic script for app.aiqa.winterwell.com connectivity issues
+# Diagnostic script for app-aiqa.winterwell.com connectivity issues
 # Run this on the server to identify problems
 
-echo "=== Diagnosing app.aiqa.winterwell.com ==="
+echo "=== Diagnosing app-aiqa.winterwell.com ==="
 echo ""
 
 # Check DNS resolution
 echo "1. Checking DNS resolution..."
-nslookup app.aiqa.winterwell.com || dig app.aiqa.winterwell.com +short
+nslookup app-aiqa.winterwell.com || dig app-aiqa.winterwell.com +short
 echo ""
 
 # Check if nginx is running
@@ -41,6 +41,14 @@ if [ -d /opt/aiqa/webapp/dist ]; then
         echo "✓ Webapp directory exists with $file_count files"
         if [ -f /opt/aiqa/webapp/dist/index.html ]; then
             echo "✓ index.html exists"
+            # Check if nginx can read it
+            if sudo -u www-data test -r /opt/aiqa/webapp/dist/index.html; then
+                echo "✓ nginx (www-data) can read index.html"
+            else
+                echo "✗ nginx (www-data) CANNOT read index.html (permission issue)"
+                echo "  Run: sudo chown -R www-data:www-data /opt/aiqa/webapp/dist"
+                echo "  Run: sudo chmod -R 755 /opt/aiqa/webapp/dist"
+            fi
         else
             echo "✗ index.html MISSING"
         fi
@@ -56,11 +64,11 @@ echo ""
 
 # Check nginx log directories
 echo "6. Checking nginx log directories..."
-if [ -d /var/log/nginx/app.aiqa.winterwell.com ]; then
+if [ -d /var/log/nginx/app-aiqa.winterwell.com ]; then
     echo "✓ Log directory exists"
 else
-    echo "✗ Log directory MISSING: /var/log/nginx/app.aiqa.winterwell.com"
-    echo "  Run: sudo mkdir -p /var/log/nginx/app.aiqa.winterwell.com && sudo chown -R www-data:www-data /var/log/nginx/"
+    echo "✗ Log directory MISSING: /var/log/nginx/app-aiqa.winterwell.com"
+    echo "  Run: sudo mkdir -p /var/log/nginx/app-aiqa.winterwell.com && sudo chown -R www-data:www-data /var/log/nginx/"
 fi
 echo ""
 
@@ -76,16 +84,16 @@ if sudo test -f /etc/letsencrypt/live/winterwell.com-0002/fullchain.pem; then
     sudo openssl x509 -in /etc/letsencrypt/live/winterwell.com-0002/fullchain.pem -noout -subject -dates 2>/dev/null || echo "✗ Certificate file exists but may be invalid"
 else
     echo "✗ SSL certificate MISSING: /etc/letsencrypt/live/winterwell.com-0002/fullchain.pem"
-    echo "  May need to run: sudo certbot certonly --nginx -d app.aiqa.winterwell.com"
+    echo "  May need to run: sudo certbot certonly --nginx -d app-aiqa.winterwell.com"
 fi
 echo ""
 
 # Check recent nginx error logs
 echo "9. Recent nginx error logs (last 20 lines)..."
-if [ -f /var/log/nginx/app.aiqa.winterwell.com/error.log ]; then
-    sudo tail -20 /var/log/nginx/app.aiqa.winterwell.com/error.log
+if [ -f /var/log/nginx/app-aiqa.winterwell.com/error.log ]; then
+    sudo tail -20 /var/log/nginx/app-aiqa.winterwell.com/error.log
 elif [ -f /var/log/nginx/error.log ]; then
-    sudo tail -20 /var/log/nginx/error.log | grep -i app.aiqa || echo "No app.aiqa errors in main log"
+    sudo tail -20 /var/log/nginx/error.log | grep -i app-aiqa || echo "No app-aiqa errors in main log"
 else
     echo "No error log found"
 fi

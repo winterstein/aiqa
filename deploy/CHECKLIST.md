@@ -36,7 +36,7 @@ Use this checklist to verify your deployment setup is complete.
 - [ ] Server nginx config installed (optional): `/etc/nginx/sites-available/server` (from `deploy/server.aiqa.nginx.conf`)
 - [ ] Server nginx config symlinked (optional): `/etc/nginx/sites-enabled/server`
 - [ ] Website nginx config installed (optional): `/etc/nginx/sites-available/website` (from `deploy/website-aiqa.nginx.conf`)
-- [ ] Nginx log directories created: `/var/log/nginx/app.aiqa.winterwell.com`, `/var/log/nginx/aiqa.winterwell.com`, and `/var/log/nginx/server.aiqa.winterwell.com` (if using server domain)
+- [ ] Nginx log directories created: `/var/log/nginx/app-aiqa.winterwell.com`, `/var/log/nginx/aiqa.winterwell.com`, and `/var/log/nginx/server-aiqa.winterwell.com` (if using server domain)
 - [ ] Website nginx config symlinked (optional): `/etc/nginx/sites-enabled/website`
 - [ ] Default nginx site disabled (if exists)
 - [ ] Nginx config tested: `sudo nginx -t`
@@ -54,7 +54,7 @@ Use this checklist to verify your deployment setup is complete.
 - [ ] Push a change to `webapp/` directory to trigger webapp deployment
 - [ ] Verify webapp deployment workflow completes successfully
 - [ ] Check nginx is running: `sudo systemctl status nginx`
-- [ ] Test webapp: `curl http://localhost` or `curl https://app.aiqa.winterwell.com`
+- [ ] Test webapp: `curl http://localhost` or `curl https://app-aiqa.winterwell.com`
 - [ ] Verify webapp can connect to server API
 
 ## Post-Deployment Verification

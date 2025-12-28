@@ -55,9 +55,9 @@ fi
 # fi
 
 # Create nginx log directories (required before nginx can start)
-sudo mkdir -p /var/log/nginx/app.aiqa.winterwell.com
+sudo mkdir -p /var/log/nginx/app-aiqa.winterwell.com
 sudo mkdir -p /var/log/nginx/aiqa.winterwell.com
-sudo mkdir -p /var/log/nginx/server.aiqa.winterwell.com  # if using server domain
+sudo mkdir -p /var/log/nginx/server-aiqa.winterwell.com  # if using server domain
 sudo chown -R www-data:www-data /var/log/nginx/
 
 # Disable default nginx site if it exists

@@ -4,7 +4,7 @@ OpenTelemetry as the tracing system.
 
 ## The AIQA Servers
 
-https://app.aiqa.winterwell.com - production webapp
+https://app-aiqa.winterwell.com - production webapp
 https://aiqa.winterwell.com - production website AND proxy to the server
 
 ### Local Servers
