@@ -91,7 +91,7 @@ jobs:
             fi
             sudo rm -f /opt/aiqa/server/package.json.old /opt/aiqa/server/pnpm-lock.yaml.old || true
 
-      - name: Create .env file on remote server
+      - name: Install dependencies and configure server
         uses: appleboy/ssh-action@v1.0.3
         env:
           SERVER_PORT: ${{ vars.SERVER_PORT || '4001' }}
@@ -117,7 +117,30 @@ jobs:
           port: ${{ secrets.DEPLOY_PORT || 22 }}
           envs: SERVER_PORT,DATABASE_URL,PGHOST,PGDATABASE,PGUSER,PGPASSWORD,PGSSLMODE,PGCHANNELBINDING,ELASTICSEARCH_URL,SPANS_INDEX,SPANS_INDEX_ALIAS,DATASET_EXAMPLES_INDEX,DATASET_EXAMPLES_INDEX_ALIAS,AUTH0_DOMAIN,AUTH0_AUDIENCE,AZURE_OPENAI_ENDPOINT
           script: |
-            # Create .env file in temp location first, then move with sudo
+            cd /opt/aiqa/server
+            # Ensure directory is writable by deployment user
+            sudo chown -R $USER:$USER /opt/aiqa/server || true
+            # Ensure pnpm is available
+            if ! command -v pnpm &> /dev/null; then
+              echo "pnpm not found, installing..."
+              npm install -g pnpm
+            fi
+            # Install dependencies (as deployment user)
+            echo "Installing production dependencies..."
+            pnpm install --prod --no-frozen-lockfile
+            # Verify critical dependencies are installed
+            if [ ! -d node_modules/fastify ]; then
+              echo "ERROR: fastify module not found after installation!"
+              echo "Retrying dependency installation..."
+              rm -rf node_modules
+              pnpm install --prod --no-frozen-lockfile
+              if [ ! -d node_modules/fastify ]; then
+                echo "ERROR: Failed to install dependencies after retry!"
+                exit 1
+              fi
+            fi
+            echo "Dependencies installed successfully"
+            # Create .env file
             {
               echo "ENVIRONMENT=production"
               echo "PORT=${SERVER_PORT:-4001}"
@@ -136,32 +159,18 @@ jobs:
               echo "AUTH0_DOMAIN=${AUTH0_DOMAIN}"
               echo "AUTH0_AUDIENCE=${AUTH0_AUDIENCE}"
               [ -n "${AZURE_OPENAI_ENDPOINT}" ] && echo "AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}"
-            } > /tmp/aiqa-server.env
-            sudo mv /tmp/aiqa-server.env /opt/aiqa/server/.env
-            sudo chown www-data:www-data /opt/aiqa/server/.env
-            sudo chmod 600 /opt/aiqa/server/.env
-
-      - name: Install dependencies on remote server
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ env.DEPLOY_HOST }}
-          username: ${{ env.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          port: ${{ secrets.DEPLOY_PORT || 22 }}
-          script: |
-            cd /opt/aiqa/server
-            # Ensure pnpm is available
-            if ! command -v pnpm &> /dev/null; then
-              echo "pnpm not found, installing..."
-              npm install -g pnpm
-            fi
-            # Install dependencies
-            pnpm install --prod --no-frozen-lockfile
-            # Fix permissions
-            sudo chown -R www-data:www-data /opt/aiqa/server
+            } > .env
+            # Set all permissions to winterwell
+            sudo chown -R winterwell:winterwell /opt/aiqa/server
+            sudo chmod 600 .env
             # Verify dist/index.js exists
             if [ ! -f dist/index.js ]; then
               echo "ERROR: dist/index.js not found!"
+              exit 1
+            fi
+            # Verify node_modules exists and contains critical dependencies
+            if [ ! -d node_modules ] || [ ! -d node_modules/fastify ]; then
+              echo "ERROR: node_modules missing or incomplete!"
               exit 1
             fi
             # Reload systemd and restart service

@@ -242,6 +242,28 @@ sudo systemctl status nginx
 5. Check if `.env` file exists: `ls -la /opt/aiqa/server/.env` (CI/CD creates this automatically)
 6. Verify systemd service file has optional EnvironmentFile: `grep EnvironmentFile /etc/systemd/system/aiqa-server.service` (should show `EnvironmentFile=-/opt/aiqa/server/.env` with the `-` prefix)
 
+### Missing dependencies (MODULE_NOT_FOUND errors)
+
+If you see errors like `Error: Cannot find module 'fastify'`, the dependencies haven't been installed:
+
+```bash
+cd /opt/aiqa/server
+# Ensure pnpm is available
+if ! command -v pnpm &> /dev/null; then
+  sudo npm install -g pnpm
+fi
+# Temporarily change ownership to install dependencies
+sudo chown -R $USER:$USER /opt/aiqa/server
+# Install production dependencies
+pnpm install --prod --no-frozen-lockfile
+# Restore ownership to www-data
+sudo chown -R www-data:www-data /opt/aiqa/server
+# Verify fastify is installed
+ls -d node_modules/fastify || echo "ERROR: fastify still missing!"
+# Restart service
+sudo systemctl restart aiqa-server
+```
+
 ### Port conflicts
 
 - Server defaults to port 4001 (set via `PORT` in `.env`)

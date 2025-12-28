@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=www-data
+User=winterwell
 WorkingDirectory=/opt/aiqa/server
 Environment="NODE_ENV=production"
 EnvironmentFile=-/opt/aiqa/server/.env
