@@ -25,21 +25,23 @@ function MessageViewer({ json, textComponent, depth = 2 }: { json: any, textComp
 		content = content.text;
 	}
 	//
-	return <div className="my-2" style={{ marginLeft: '20px', borderLeft: '2px solid #ccc', paddingLeft: '10px', maxWidth: '100%', minWidth: 0, overflowX: 'auto' }}>
-		<div className="d-flex align-items-center mb-1">			
-			<b className="ms-2 me-2">Role:</b> <span>{json.role}</span>
-			<span className="ms-2">{$copyButton}</span>
+	return <div className="my-2" style={{ marginLeft: '20px', border: '2px solid #ccc', borderRadius: '5px', padding: '10px', maxWidth: '100%', minWidth: 0, overflowX: 'auto' }}>
+		<div className="d-flex align-items-center mb-1 w-100">			
+			<div><b className="ms-2 me-2">Role:</b> <span>{json.role}</span></div>
+			<span className="ms-auto">{$copyButton}</span>
 		</div>
 		<div className="my-1">
-			<b>Content:</b>
-			<ExpandCollapseControl
-				hasChildren={true}
-				isExpanded={expanded}
-				onToggle={() => setExpanded(!expanded)}
-			/>
+			<div style={{ display: 'flex', alignItems: 'center' }}>
+				<b>Content:</b>
+				<ExpandCollapseControl
+					hasChildren={true}
+					isExpanded={expanded}
+					onToggle={() => setExpanded(!expanded)}
+				/>
+			</div>
 			{expanded
 				? (typeof content === "string" ? <TextComponent text={content} depth={depth - 1} /> : <JsonObjectViewer json={content} textComponent={textComponent} depth={depth - 1} />)
-				: (typeof content === "string" ? content.substring(0, 100) : JSON.stringify(content).substring(0, 100))
+				: <TruncatedText text={typeof content === "string" ? content : JSON.stringify(content)} maxLength={100} setExpanded={setExpanded} />
 			}			
 		</div>
 		{Object.keys(otherKVs).length > 0 && (
@@ -48,6 +50,13 @@ function MessageViewer({ json, textComponent, depth = 2 }: { json: any, textComp
 			</div>
 		)}
 	</div>;
+}
+
+function TruncatedText({ text, maxLength, setExpanded }: { text: string, maxLength: number, setExpanded: (expanded: boolean) => void }) {
+	if (text.length <= maxLength) {
+		return <span>{text}</span>;
+	}
+	return <div style={{ display: 'inline-block' }}>{text.substring(0, maxLength)} <span onClick={() => setExpanded(true)} style={{ cursor: 'pointer' }}>...</span></div>;
 }
 
 
@@ -63,6 +72,10 @@ export default function JsonObjectViewer({ json, textComponent, depth = 2 }: { j
 
 	// HACK is this a chat message?
 	if (json.role && json.content) {
+		return <MessageViewer json={json} textComponent={textComponent} depth={depth} />
+	}
+	// HACK is this an LLM chat response? Recognise OpenAI and other common formats
+	if (json.choices && json.choices.length > 0 && json.choices[0].message?.content) {
 		return <MessageViewer json={json} textComponent={textComponent} depth={depth} />
 	}
 

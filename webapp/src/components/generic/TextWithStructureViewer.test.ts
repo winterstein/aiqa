@@ -171,6 +171,20 @@ describe('extractBlocks', () => {
 		const uniqueIds = new Set(ids);
 		expect(uniqueIds.size).toBe(ids.length);
 	});
+
+	it('should extract nested XML blocks correctly', () => {
+		const text = 'Take time, and make as close to a complete draft as possible.\n\n<extra_instructions>\n<CANVAS_TEXT></CANVAS_TEXT>\n</extra_instructions>';
+		const blocks = extractBlocks(text);
+		
+		expect(blocks.length).toBeGreaterThanOrEqual(2);
+		const textBlock = blocks.find(b => b.type === 'text');
+		expect(textBlock).toBeDefined();
+		expect(textBlock?.text).toContain('Take time, and make as close to a complete draft as possible.');
+		
+		const xmlBlock = blocks.find(b => b.type === 'xml');
+		expect(xmlBlock).toBeDefined();
+		expect(xmlBlock?.xml).toBe('<extra_instructions>\n<CANVAS_TEXT></CANVAS_TEXT>\n</extra_instructions>');
+	});
 });
 
 describe('extractBlockJson', () => {

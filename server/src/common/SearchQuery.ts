@@ -85,13 +85,28 @@ SearchQuery.parse = (sq: SearchQuery) => {
 	let bits2: any[] = [];
 	let i = 0;
 	let op = SearchQuery.AND;
-	if (bits.includes("OR")) {
+	// If both AND and OR are present, use AND as top-level (AND has higher precedence)
+	const hasOR = bits.includes("OR");
+	const hasAND = bits.includes("AND");
+	if (hasOR && !hasAND) {
 		op = SearchQuery.OR;
+	} else if (hasAND) {
+		op = SearchQuery.AND;
 	}
 	
 	while (i < bits.length) {
-		const bit = bits[i];
-		if (bit === op) {
+		let bit = bits[i];
+		// Strip leading and trailing parentheses from tokens
+		// This handles cases like "(traceId:value" or "value)" or "(value)"
+		while (bit.startsWith('(')) {
+			bit = bit.slice(1);
+		}
+		while (bit.endsWith(')')) {
+			bit = bit.slice(0, -1);
+		}
+		
+		// Skip operator tokens (both AND and OR, regardless of which is the top-level op)
+		if (bit === SearchQuery.AND || bit === SearchQuery.OR) {
 			i++;
 			continue;
 		}
@@ -104,7 +119,12 @@ SearchQuery.parse = (sq: SearchQuery) => {
 				let j = i + 1;
 				// Collect following tokens until we find the closing quote
 				while (j < bits.length && !value.endsWith('"')) {
-					value += ' ' + bits[j];
+					let nextBit = bits[j];
+					// Strip trailing parentheses from tokens before adding to quoted value
+					while (nextBit.endsWith(')')) {
+						nextBit = nextBit.slice(0, -1);
+					}
+					value += ' ' + nextBit;
 					j++;
 				}
 				// Remove quotes from the value

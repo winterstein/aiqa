@@ -309,3 +309,180 @@ tap.test('SearchQuery - empty query after removing all terms', t => {
   t.end();
 });
 
+// Tests for parentheses handling (bug fix)
+tap.test('SearchQuery.parse - parentheses around field:value', t => {
+  const sq = new SearchQuery('(traceId:871d07301f2ece35baf54e06add78544)');
+  t.ok(sq.tree, 'tree should be parsed');
+  const hasTraceId = sq.tree!.some(bit => typeof bit === 'object' && 'traceId' in bit);
+  t.ok(hasTraceId, 'should parse traceId field with parentheses');
+  const traceIdValue = sq.tree!.find(bit => typeof bit === 'object' && 'traceId' in bit);
+  t.equal(traceIdValue!['traceId'], '871d07301f2ece35baf54e06add78544', 'should extract value correctly');
+  t.end();
+});
+
+tap.test('SearchQuery.parse - parentheses around first field:value in OR query', t => {
+  const sq = new SearchQuery('(traceId:871d07301f2ece35baf54e06add78544 OR traceId:7ee52d7bb0be3118970bc399354c92c6)');
+  t.ok(sq.tree, 'tree should be parsed');
+  t.equal(sq.tree![0], SearchQuery.OR, 'should detect OR operator');
+  const traceIdBits = sq.tree!.filter(bit => typeof bit === 'object' && 'traceId' in bit);
+  t.equal(traceIdBits.length, 2, 'should parse both traceId values');
+  t.equal(traceIdBits[0]['traceId'], '871d07301f2ece35baf54e06add78544', 'should parse first traceId correctly');
+  t.equal(traceIdBits[1]['traceId'], '7ee52d7bb0be3118970bc399354c92c6', 'should parse second traceId correctly');
+  t.end();
+});
+
+tap.test('SearchQuery.parse - parentheses around last field:value in OR query', t => {
+  const sq = new SearchQuery('(traceId:871d07301f2ece35baf54e06add78544 OR traceId:7ee52d7bb0be3118970bc399354c92c6)');
+  t.ok(sq.tree, 'tree should be parsed');
+  const traceIdBits = sq.tree!.filter(bit => typeof bit === 'object' && 'traceId' in bit);
+  t.equal(traceIdBits.length, 2, 'should parse both traceId values');
+  t.equal(traceIdBits[1]['traceId'], '7ee52d7bb0be3118970bc399354c92c6', 'should parse last traceId correctly without trailing paren');
+  t.end();
+});
+
+tap.test('SearchQuery.parse - multiple OR conditions with parentheses (real-world case)', t => {
+  const query = '(traceId:871d07301f2ece35baf54e06add78544 OR traceId:7ee52d7bb0be3118970bc399354c92c6 OR traceId:487c9dc63c7f0c49e8b671357ce82c67)';
+  const sq = new SearchQuery(query);
+  t.ok(sq.tree, 'tree should be parsed');
+  t.equal(sq.tree![0], SearchQuery.OR, 'should detect OR operator');
+  const traceIdBits = sq.tree!.filter(bit => typeof bit === 'object' && 'traceId' in bit);
+  t.equal(traceIdBits.length, 3, 'should parse all three traceId values');
+  t.equal(traceIdBits[0]['traceId'], '871d07301f2ece35baf54e06add78544', 'should parse first traceId');
+  t.equal(traceIdBits[1]['traceId'], '7ee52d7bb0be3118970bc399354c92c6', 'should parse second traceId');
+  t.equal(traceIdBits[2]['traceId'], '487c9dc63c7f0c49e8b671357ce82c67', 'should parse third traceId');
+  t.end();
+});
+
+tap.test('SearchQuery.parse - parentheses with AND operator', t => {
+  const sq = new SearchQuery('(lang:en AND vert:foo)');
+  t.ok(sq.tree, 'tree should be parsed');
+  t.equal(sq.tree![0], SearchQuery.AND, 'should detect AND operator');
+  const langBit = sq.tree!.find(bit => typeof bit === 'object' && 'lang' in bit);
+  const vertBit = sq.tree!.find(bit => typeof bit === 'object' && 'vert' in bit);
+  t.ok(langBit, 'should parse lang field');
+  t.ok(vertBit, 'should parse vert field');
+  t.equal(langBit!['lang'], 'en', 'should extract lang value correctly');
+  t.equal(vertBit!['vert'], 'foo', 'should extract vert value correctly');
+  t.end();
+});
+
+tap.test('SearchQuery.parse - opening parenthesis only', t => {
+  const sq = new SearchQuery('(traceId:871d07301f2ece35baf54e06add78544');
+  t.ok(sq.tree, 'tree should be parsed');
+  const traceIdBit = sq.tree!.find(bit => typeof bit === 'object' && 'traceId' in bit);
+  t.ok(traceIdBit, 'should parse traceId field');
+  t.equal(traceIdBit!['traceId'], '871d07301f2ece35baf54e06add78544', 'should extract value correctly');
+  t.end();
+});
+
+tap.test('SearchQuery.parse - closing parenthesis only', t => {
+  const sq = new SearchQuery('traceId:871d07301f2ece35baf54e06add78544)');
+  t.ok(sq.tree, 'tree should be parsed');
+  const traceIdBit = sq.tree!.find(bit => typeof bit === 'object' && 'traceId' in bit);
+  t.ok(traceIdBit, 'should parse traceId field');
+  t.equal(traceIdBit!['traceId'], '871d07301f2ece35baf54e06add78544', 'should extract value correctly');
+  t.end();
+});
+
+tap.test('SearchQuery.parse - nested parentheses', t => {
+  const sq = new SearchQuery('((traceId:871d07301f2ece35baf54e06add78544))');
+  t.ok(sq.tree, 'tree should be parsed');
+  const traceIdBit = sq.tree!.find(bit => typeof bit === 'object' && 'traceId' in bit);
+  t.ok(traceIdBit, 'should parse traceId field with nested parentheses');
+  t.equal(traceIdBit!['traceId'], '871d07301f2ece35baf54e06add78544', 'should extract value correctly');
+  t.end();
+});
+
+tap.test('SearchQuery.parse - parentheses with quoted values', t => {
+  const sq = new SearchQuery('(vert:"foo bar" OR vert:"baz qux")');
+  t.ok(sq.tree, 'tree should be parsed');
+  t.equal(sq.tree![0], SearchQuery.OR, 'should detect OR operator');
+  const vertBits = sq.tree!.filter(bit => typeof bit === 'object' && 'vert' in bit);
+  t.equal(vertBits.length, 2, 'should parse both vert values');
+  t.equal(vertBits[0]['vert'], 'foo bar', 'should parse first quoted value');
+  t.equal(vertBits[1]['vert'], 'baz qux', 'should parse second quoted value');
+  t.end();
+});
+
+tap.test('SearchQuery.parse - parentheses with plain text terms', t => {
+  const sq = new SearchQuery('(apples OR oranges)');
+  t.ok(sq.tree, 'tree should be parsed');
+  t.equal(sq.tree![0], SearchQuery.OR, 'should detect OR operator');
+  const hasApples = sq.tree!.some(bit => bit === 'apples');
+  const hasOranges = sq.tree!.some(bit => bit === 'oranges');
+  t.ok(hasApples, 'should parse apples');
+  t.ok(hasOranges, 'should parse oranges');
+  t.end();
+});
+
+tap.test('SearchQuery.parse - mixed parentheses and field:value', t => {
+  const sq = new SearchQuery('(traceId:871d07301f2ece35baf54e06add78544) AND attributes.aiqa.span_type:feedback');
+  t.ok(sq.tree, 'tree should be parsed');
+  t.equal(sq.tree![0], SearchQuery.AND, 'should detect AND operator');
+  const traceIdBit = sq.tree!.find(bit => typeof bit === 'object' && 'traceId' in bit);
+  const spanTypeBit = sq.tree!.find(bit => typeof bit === 'object' && 'attributes.aiqa.span_type' in bit);
+  t.ok(traceIdBit, 'should parse traceId field');
+  t.ok(spanTypeBit, 'should parse attributes.aiqa.span_type field');
+  t.equal(traceIdBit!['traceId'], '871d07301f2ece35baf54e06add78544', 'should extract traceId correctly');
+  t.equal(spanTypeBit!['attributes.aiqa.span_type'], 'feedback', 'should extract span_type correctly');
+  t.end();
+});
+
+tap.test('SearchQuery.parse - field names with dots and parentheses', t => {
+  const sq = new SearchQuery('(attributes.aiqa.span_type:feedback)');
+  t.ok(sq.tree, 'tree should be parsed');
+  const spanTypeBit = sq.tree!.find(bit => typeof bit === 'object' && 'attributes.aiqa.span_type' in bit);
+  t.ok(spanTypeBit, 'should parse field with dots');
+  t.equal(spanTypeBit!['attributes.aiqa.span_type'], 'feedback', 'should extract value correctly');
+  t.end();
+});
+
+tap.test('SearchQuery.parse - empty parentheses', t => {
+  const sq = new SearchQuery('()');
+  t.ok(sq.tree, 'tree should be parsed');
+  // Empty parentheses should result in an empty or minimal tree
+  t.ok(sq.tree!.length >= 1, 'tree should have at least operator');
+  t.end();
+});
+
+tap.test('SearchQuery.parse - value ending with closing parenthesis', t => {
+  const sq = new SearchQuery('traceId:value)');
+  t.ok(sq.tree, 'tree should be parsed');
+  const traceIdBit = sq.tree!.find(bit => typeof bit === 'object' && 'traceId' in bit);
+  t.ok(traceIdBit, 'should parse traceId field');
+  t.equal(traceIdBit!['traceId'], 'value', 'should extract value without trailing paren');
+  t.end();
+});
+
+tap.test('SearchQuery.parse - value starting with opening parenthesis', t => {
+  const sq = new SearchQuery('traceId:(value');
+  t.ok(sq.tree, 'tree should be parsed');
+  const traceIdBit = sq.tree!.find(bit => typeof bit === 'object' && 'traceId' in bit);
+  t.ok(traceIdBit, 'should parse traceId field');
+  t.equal(traceIdBit!['traceId'], '(value', 'should extract value with opening paren if part of value');
+  t.end();
+});
+
+tap.test('SearchQuery.parse - complex real-world query from error log', t => {
+  // This is the actual query from the error log that was failing
+  const query = '(traceId:871d07301f2ece35baf54e06add78544 OR traceId:7ee52d7bb0be3118970bc399354c92c6 OR traceId:487c9dc63c7f0c49e8b671357ce82c67 OR traceId:cfc7bd7d8815fd73d8981ff690d4060a OR traceId:285ae64f68e67931ad7b6c1bb66055f5) AND attributes.aiqa.span_type:feedback';
+  const sq = new SearchQuery(query);
+  t.ok(sq.tree, 'tree should be parsed');
+  // The query should parse without errors
+  const traceIdBits = sq.tree!.filter(bit => typeof bit === 'object' && 'traceId' in bit);
+  t.ok(traceIdBits.length >= 1, 'should parse at least one traceId');
+  const spanTypeBit = sq.tree!.find(bit => typeof bit === 'object' && 'attributes.aiqa.span_type' in bit);
+  t.ok(spanTypeBit, 'should parse attributes.aiqa.span_type field');
+  t.end();
+});
+
+tap.test('SearchQuery.parse - OR query with AND after parentheses', t => {
+  const sq = new SearchQuery('(traceId:1 OR traceId:2) AND parentSpanId:unset');
+  t.ok(sq.tree, 'tree should be parsed');
+  t.equal(sq.tree![0], SearchQuery.AND, 'should detect AND as top-level operator');
+  const traceIdBits = sq.tree!.filter(bit => typeof bit === 'object' && 'traceId' in bit);
+  t.ok(traceIdBits.length >= 1, 'should parse traceId fields');
+  const parentSpanIdBit = sq.tree!.find(bit => typeof bit === 'object' && 'parentSpanId' in bit);
+  t.ok(parentSpanIdBit, 'should parse parentSpanId field');
+  t.end();
+});

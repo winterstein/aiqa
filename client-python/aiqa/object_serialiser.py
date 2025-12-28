@@ -6,6 +6,7 @@ Handles objects, dataclasses, circular references, and size limits.
 import json
 import os
 import dataclasses
+from datetime import datetime, date, time
 from typing import Any, Callable, Set
 
 def toNumber(value: str|int|None) -> int:
@@ -180,6 +181,14 @@ def object_to_dict(obj: Any, visited: Set[int], max_depth: int = 10, current_dep
     if isinstance(obj, (str, int, float, bool, bytes)):
         return obj
     
+    # Handle datetime objects
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, date):
+        return obj.isoformat()
+    if isinstance(obj, time):
+        return obj.isoformat()
+    
     # Handle dict
     if isinstance(obj, dict):
         visited.add(obj_id)
@@ -319,6 +328,14 @@ def json_default_handler_factory(visited: Set[int]) -> Callable[[Any], Any]:
     Create a JSON default handler with a shared visited set for circular reference detection.
     """
     def handler(obj: Any) -> Any:
+        # Handle datetime objects
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        if isinstance(obj, date):
+            return obj.isoformat()
+        if isinstance(obj, time):
+            return obj.isoformat()
+        
         # Handle bytes
         if isinstance(obj, bytes):
             try:

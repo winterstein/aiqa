@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { Container, Row, Col } from 'reactstrap';
+import React, { useMemo, useState, useEffect } from 'react';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { Container, Row, Col, FormGroup, Label, Input, Form } from 'reactstrap';
 import { ColumnDef } from '@tanstack/react-table';
+import { useQueryClient } from '@tanstack/react-query';
 import { searchSpans } from '../api';
 import { Span } from '../common/types';
 import TableUsingAPI, { PageableData } from '../components/generic/TableUsingAPI';
@@ -28,69 +29,369 @@ const getFeedback = (span: Span): { type: 'positive' | 'negative' | 'neutral' | 
   return null;
 };
 
+// Attributes we need for the traces list page
+const REQUIRED_ATTRIBUTES = [
+  'gen_ai.usage.total_tokens',
+  'gen_ai.usage.input_tokens',
+  'gen_ai.usage.output_tokens',
+  'gen_ai.cost.usd',
+  'gen_ai.component.id',
+  'component',
+].join(',');
+
+// Attributes we need for feedback spans
+const FEEDBACK_ATTRIBUTES = [
+  'aiqa.span_type',
+  'feedback.type',
+  'feedback.thumbs_up',
+  'feedback.comment',
+].join(',');
+
+// Strip down attributes to only what we need
+const stripAttributes = (span: Span, requiredAttrs: string[]): Span => {
+  const spanAny = span as any;
+  if (!spanAny.attributes) return span;
+  
+  const stripped: Record<string, any> = {};
+  requiredAttrs.forEach(attr => {
+    if (spanAny.attributes[attr] !== undefined) {
+      stripped[attr] = spanAny.attributes[attr];
+    }
+  });
+  
+  return {
+    ...span,
+    attributes: stripped,
+  } as Span;
+};
+
+type DateFilterType = '1h' | '1d' | '1w' | 'custom';
+
+// Convert relative time format to ISO string
+const getRelativeTime = (relative: string): string => {
+  const match = relative.match(/^-(\d+)([hdw])$/);
+  if (!match) return relative; // Assume it's already ISO format
+  
+  const amount = parseInt(match[1], 10);
+  const unit = match[2];
+  const now = new Date();
+  
+  switch (unit) {
+    case 'h':
+      now.setHours(now.getHours() - amount);
+      break;
+    case 'd':
+      now.setDate(now.getDate() - amount);
+      break;
+    case 'w':
+      now.setDate(now.getDate() - (amount * 7));
+      break;
+  }
+  
+  return now.toISOString();
+};
+
+// Convert ISO string to relative format if possible, otherwise return ISO
+const toRelativeOrIso = (iso: string): string => {
+  const date = new Date(iso);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffHours = diffMs / (1000 * 60 * 60);
+  const diffDays = diffMs / (1000 * 60 * 60 * 24);
+  const diffWeeks = diffDays / 7;
+  
+  // Check if it matches common relative times (within 1 minute tolerance)
+  if (Math.abs(diffHours - 1) < 1/60) return '-1h';
+  if (Math.abs(diffDays - 1) < 1/24) return '-1d';
+  if (Math.abs(diffWeeks - 1) < 1/7) return '-1w';
+  
+  return iso;
+};
+
 const TracesListPage: React.FC = () => {
   const { organisationId } = useParams<{ organisationId: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [feedbackMap, setFeedbackMap] = useState<Map<string, { type: 'positive' | 'negative' | 'neutral'; comment?: string }>>(new Map());
-  const [allSpans, setAllSpans] = useState<Span[]>([]);
-
-  const loadData = async (query: string): Promise<PageableData<Span>> => {
-    const limit = 1000; // Fetch more traces for in-memory filtering
-    // Request all fields including attributes since we need them for tokens, cost, feedback, and component
-    const result = await searchSpans({ organisationId: organisationId!, query, isRoot: true, limit, offset: 0, fields: '*' });
-    
-    console.log('[TracesListPage] API Response:', {
-      total: result.total,
-      offset: result.offset,
-      limit: result.limit,
-      hitsCount: result.hits?.length || 0,
-    });
-    
-    if (result.hits && result.hits.length > 0) {
-      console.log('[TracesListPage] First span sample:', result.hits[0]);
-      console.log('[TracesListPage] First span keys:', Object.keys(result.hits[0]));
-      console.log('[TracesListPage] First span properties:', {
-        name: (result.hits[0] as any).name,
-        traceId: (result.hits[0] as any).traceId,
-        client_trace_id: (result.hits[0] as any).client_trace_id,
-        startTime: (result.hits[0] as any).startTime,
-        duration: (result.hits[0] as any).duration,
-      });
-      
-      // Fetch feedback spans for all traces
-      const traceIds = result.hits.map(span => getTraceId(span)).filter(id => id);
-      if (traceIds.length > 0) {
-        // Query for feedback spans - use attribute path format
-        const feedbackQuery = traceIds.map(id => `traceId:${id}`).join(' OR ');
-        const feedbackResult = await searchSpans({
-          organisationId: organisationId!,
-          query: `(${feedbackQuery}) AND attributes.aiqa\\.span_type:feedback`,
-          limit: 1000,
-          offset: 0,
-          fields: '*' // Need attributes for feedback information
-        });
-        
-        // Create feedback map
-        const newFeedbackMap = new Map<string, { type: 'positive' | 'negative' | 'neutral'; comment?: string }>();
-        if (feedbackResult.hits) {
-          feedbackResult.hits.forEach((span: Span) => {
-            const traceId = getTraceId(span);
-            if (traceId) {
-              const feedback = getFeedback(span);
-              if (feedback && feedback.type !== null) {
-                newFeedbackMap.set(traceId, feedback);
-              }
-            }
-          });
-        }
-        setFeedbackMap(newFeedbackMap);
+  const [enrichedSpans, setEnrichedSpans] = useState<Map<string, Span>>(new Map());
+  
+  // Get date filter from URL params, default to '1d'
+  const dateFilterType = (searchParams.get('dateFilter') || '1d') as DateFilterType;
+  const sinceParam = searchParams.get('since') || '';
+  const untilParam = searchParams.get('until') || '';
+  
+  // Initialize date filter state from URL params
+  const [customSince, setCustomSince] = useState<string>(() => {
+    if (dateFilterType === 'custom' && sinceParam) {
+      // If it's a relative format, convert to ISO for the input
+      if (sinceParam.startsWith('-')) {
+        return getRelativeTime(sinceParam);
       }
-      
-      // Store all spans for dashboard
-      setAllSpans(result.hits || []);
+      return sinceParam;
+    }
+    return '';
+  });
+  
+  const [customUntil, setCustomUntil] = useState<string>(() => {
+    if (dateFilterType === 'custom' && untilParam) {
+      if (untilParam.startsWith('-')) {
+        return getRelativeTime(untilParam);
+      }
+      return untilParam;
+    }
+    return '';
+  });
+  
+  // Update URL params when date filter changes
+  const updateDateFilter = (type: DateFilterType, since?: string, until?: string) => {
+    const newParams = new URLSearchParams(searchParams);
+    
+    if (type === 'custom') {
+      newParams.set('dateFilter', 'custom');
+      if (since) {
+        newParams.set('since', since);
+      } else {
+        newParams.delete('since');
+      }
+      if (until) {
+        newParams.set('until', until);
+      } else {
+        newParams.delete('until');
+      }
+    } else {
+      newParams.set('dateFilter', type);
+      // For preset filters, only set since
+      const now = new Date();
+      let sinceDate: Date;
+      switch (type) {
+        case '1h':
+          sinceDate = new Date(now.getTime() - 60 * 60 * 1000);
+          break;
+        case '1d':
+          sinceDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+          break;
+        case '1w':
+          sinceDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          break;
+        default:
+          sinceDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      }
+      // Use relative format for preset filters
+      const relativeFormat = type === '1h' ? '-1h' : type === '1d' ? '-1d' : '-1w';
+      newParams.set('since', relativeFormat);
+      newParams.delete('until');
     }
     
+    setSearchParams(newParams, { replace: true });
+  };
+  
+  // Build date filter query string
+  const buildDateFilterQuery = (): string => {
+    const parts: string[] = [];
+    
+    if (dateFilterType === 'custom') {
+      if (sinceParam) {
+        const sinceValue = sinceParam.startsWith('-') ? getRelativeTime(sinceParam) : sinceParam;
+        parts.push(`startTime:>=${sinceValue}`);
+      }
+      if (untilParam) {
+        const untilValue = untilParam.startsWith('-') ? getRelativeTime(untilParam) : untilParam;
+        parts.push(`startTime:<=${untilValue}`);
+      }
+    } else {
+      // For preset filters, only use since
+      if (sinceParam) {
+        const sinceValue = sinceParam.startsWith('-') ? getRelativeTime(sinceParam) : sinceParam;
+        parts.push(`startTime:>=${sinceValue}`);
+      }
+    }
+    
+    return parts.length > 0 ? parts.join(' AND ') : '';
+  };
+
+  // Step 1: Load root spans without attributes (fast)
+  const loadRootSpans = async (query: string): Promise<PageableData<Span>> => {
+    const limit = 1000; // Fetch more traces for in-memory filtering
+    // Don't request attributes - just basic span data
+    // Exclude input/output in case any attributes are returned
+    
+    // Build combined query with date filter
+    const dateFilter = buildDateFilterQuery();
+    let combinedQuery = query;
+    if (dateFilter) {
+      combinedQuery = combinedQuery ? `(${query}) AND (${dateFilter})` : dateFilter;
+    }
+    
+    const result = await searchSpans({ 
+      organisationId: organisationId!, 
+      query: combinedQuery, 
+      isRoot: true, 
+      limit, 
+      offset: 0,
+      exclude: 'attributes.input,attributes.output', // Exclude large input/output attributes
+      // No fields parameter = no attributes by default
+    });
+    
     return result;
+  };
+
+  // Step 2: Load attributes for a single batch of traces (cached via useQuery)
+  // Queries by traceId to get root spans with attributes
+  const loadSpanAttributesBatch = async (traceIds: string[]): Promise<Map<string, Span>> => {
+    if (traceIds.length === 0) return new Map();
+    
+    const traceIdQuery = traceIds.map(id => `traceId:${id}`).join(' OR ');
+    
+    // Query for root spans in these traces with only the attributes we need
+    // Exclude input/output as they can be very large
+    const result = await searchSpans({
+      organisationId: organisationId!,
+      query: `(${traceIdQuery}) AND parentSpanId:unset`,
+      limit: traceIds.length,
+      offset: 0,
+      fields: REQUIRED_ATTRIBUTES, // Only fetch the attributes we need
+      exclude: 'attributes.input,attributes.output', // Exclude large input/output attributes
+    });
+    
+    const attributeMap = new Map<string, Span>();
+    if (result.hits) {
+      result.hits.forEach((span: Span) => {
+        const traceId = getTraceId(span);
+        if (traceId) {
+          // Strip down to only required attributes
+          const stripped = stripAttributes(span, REQUIRED_ATTRIBUTES.split(','));
+          attributeMap.set(traceId, stripped);
+        }
+      });
+    }
+    
+    return attributeMap;
+  };
+
+  // Step 3: Load feedback spans for a single batch (cached via useQuery)
+  const loadFeedbackSpansBatch = async (traceIds: string[]): Promise<Map<string, { type: 'positive' | 'negative' | 'neutral'; comment?: string }>> => {
+    if (traceIds.length === 0) return new Map();
+    
+    const feedbackQuery = traceIds.map(id => `traceId:${id}`).join(' OR ');
+    
+    const feedbackResult = await searchSpans({
+      organisationId: organisationId!,
+      query: `(${feedbackQuery}) AND attributes.aiqa\\.span_type:feedback`,
+      limit: traceIds.length,
+      offset: 0,
+      fields: FEEDBACK_ATTRIBUTES, // Only fetch feedback attributes
+    });
+    
+    const feedbackMap = new Map<string, { type: 'positive' | 'negative' | 'neutral'; comment?: string }>();
+    if (feedbackResult.hits) {
+      feedbackResult.hits.forEach((span: Span) => {
+        const traceId = getTraceId(span);
+        if (traceId) {
+          const feedback = getFeedback(span);
+          if (feedback && feedback.type !== null) {
+            feedbackMap.set(traceId, feedback);
+          }
+        }
+      });
+    }
+    
+    return feedbackMap;
+  };
+
+  // Main loadData function - loads root spans first, then enriches with attributes
+  const loadData = async (query: string): Promise<PageableData<Span>> => {
+    // Step 1: Load root spans without attributes (fast)
+    const rootSpansResult = await loadRootSpans(query);
+    
+    if (!rootSpansResult.hits || rootSpansResult.hits.length === 0) {
+      return rootSpansResult;
+    }
+
+    // Step 2: Extract trace IDs
+    const traceIds = rootSpansResult.hits
+      .map(span => getTraceId(span))
+      .filter((id): id is string => !!id);
+
+    // Step 3: Load attributes and feedback in batches of 10, with caching
+    const BATCH_SIZE = 10;
+    const allAttributeMaps: Map<string, Span>[] = [];
+    const allFeedbackMaps: Map<string, { type: 'positive' | 'negative' | 'neutral'; comment?: string }>[] = [];
+
+    // Process span attributes in batches (by traceId)
+    for (let i = 0; i < traceIds.length; i += BATCH_SIZE) {
+      const batch = traceIds.slice(i, i + BATCH_SIZE);
+      // Sort batch for consistent cache key
+      const sortedBatch = [...batch].sort();
+      const cacheKey = ['span-attributes', organisationId, sortedBatch.join(',')];
+      
+      const attributeMap = await queryClient.fetchQuery({
+        queryKey: cacheKey,
+        queryFn: () => loadSpanAttributesBatch(batch),
+        staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+      });
+      allAttributeMaps.push(attributeMap);
+    }
+
+    // Process feedback in batches
+    for (let i = 0; i < traceIds.length; i += BATCH_SIZE) {
+      const batch = traceIds.slice(i, i + BATCH_SIZE);
+      // Sort batch for consistent cache key
+      const sortedBatch = [...batch].sort();
+      const cacheKey = ['feedback-spans', organisationId, sortedBatch.join(',')];
+      
+      const feedbackMap = await queryClient.fetchQuery({
+        queryKey: cacheKey,
+        queryFn: () => loadFeedbackSpansBatch(batch),
+        staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+      });
+      allFeedbackMaps.push(feedbackMap);
+    }
+
+    // Merge all attribute maps
+    const attributesMap = new Map<string, Span>();
+    allAttributeMaps.forEach(map => {
+      map.forEach((value, key) => attributesMap.set(key, value));
+    });
+
+    // Merge all feedback maps
+    const feedbackData = new Map<string, { type: 'positive' | 'negative' | 'neutral'; comment?: string }>();
+    allFeedbackMaps.forEach(map => {
+      map.forEach((value, key) => feedbackData.set(key, value));
+    });
+
+    // Step 4: Merge attributes back into spans (by traceId)
+    const enriched = rootSpansResult.hits.map(span => {
+      const traceId = getTraceId(span);
+      const enrichedSpan = traceId ? attributesMap.get(traceId) : null;
+      if (enrichedSpan) {
+        // Merge attributes from enriched span
+        return {
+          ...span,
+          attributes: {
+            ...(span as any).attributes,
+            ...(enrichedSpan as any).attributes,
+          },
+        } as Span;
+      }
+      return span;
+    });
+
+    // Update state
+    setFeedbackMap(feedbackData);
+    const enrichedMap = new Map<string, Span>();
+    enriched.forEach(span => {
+      const traceId = getTraceId(span);
+      if (traceId) {
+        enrichedMap.set(traceId, span);
+      }
+    });
+    setEnrichedSpans(enrichedMap);
+
+    return {
+      ...rootSpansResult,
+      hits: enriched,
+    };
   };
 
   const columns = useMemo<ColumnDef<Span>[]>(
@@ -224,6 +525,36 @@ const TracesListPage: React.FC = () => {
     [organisationId, feedbackMap]
   );
 
+  // Handle custom date changes
+  const handleCustomSinceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setCustomSince(value);
+    if (value) {
+      // Convert to ISO format if it's a datetime-local input
+      const isoValue = value.includes('T') ? new Date(value).toISOString() : value;
+      updateDateFilter('custom', isoValue, untilParam);
+    } else {
+      updateDateFilter('custom', undefined, untilParam);
+    }
+  };
+  
+  const handleCustomUntilChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setCustomUntil(value);
+    if (value) {
+      // Convert to ISO format if it's a datetime-local input
+      const isoValue = value.includes('T') ? new Date(value).toISOString() : value;
+      updateDateFilter('custom', sinceParam, isoValue);
+    } else {
+      updateDateFilter('custom', sinceParam, undefined);
+    }
+  };
+  
+  const handleDateFilterTypeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newType = e.target.value as DateFilterType;
+    updateDateFilter(newType);
+  };
+
   return (
     <Container className="mt-4">
       <Row>
@@ -232,10 +563,57 @@ const TracesListPage: React.FC = () => {
         </Col>
       </Row>
 
-      {allSpans.length > 0 && (
+      <Row className="mt-3">
+        <Col>
+          <Form>
+            <FormGroup>
+              <Label for="dateFilter">Date Filter</Label>
+              <Input
+                type="select"
+                id="dateFilter"
+                value={dateFilterType}
+                onChange={handleDateFilterTypeChange}
+                style={{ maxWidth: '200px' }}
+              >
+                <option value="1h">1 hour</option>
+                <option value="1d">1 day</option>
+                <option value="1w">1 week</option>
+                <option value="custom">Custom</option>
+              </Input>
+            </FormGroup>
+            
+            {dateFilterType === 'custom' && (
+              <>
+                <FormGroup>
+                  <Label for="customSince">Since</Label>
+                  <Input
+                    type="datetime-local"
+                    id="customSince"
+                    value={customSince ? new Date(customSince).toISOString().slice(0, 16) : ''}
+                    onChange={handleCustomSinceChange}
+                    style={{ maxWidth: '300px' }}
+                  />
+                </FormGroup>
+                <FormGroup>
+                  <Label for="customUntil">Until</Label>
+                  <Input
+                    type="datetime-local"
+                    id="customUntil"
+                    value={customUntil ? new Date(customUntil).toISOString().slice(0, 16) : ''}
+                    onChange={handleCustomUntilChange}
+                    style={{ maxWidth: '300px' }}
+                  />
+                </FormGroup>
+              </>
+            )}
+          </Form>
+        </Col>
+      </Row>
+
+      {enrichedSpans.size > 0 && (
         <Row className="mt-3">
           <Col>
-            <TracesListDashboard spans={allSpans} feedbackMap={feedbackMap} />
+            <TracesListDashboard spans={Array.from(enrichedSpans.values())} feedbackMap={feedbackMap} />
           </Col>
         </Row>
       )}

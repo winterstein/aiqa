@@ -8,6 +8,7 @@ import json
 import logging
 import threading
 import time
+import io
 from typing import List, Dict, Any, Optional
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
@@ -343,9 +344,13 @@ class AIQASpanExporter(SpanExporter):
             logger.debug("_send_spans() no API key provided")
 
         try:
+            # Pre-serialize JSON to bytes and wrap in BytesIO to avoid blocking event loop
+            json_bytes = json.dumps(spans).encode('utf-8')
+            data = io.BytesIO(json_bytes)
+            
             async with aiohttp.ClientSession() as session:
                 logger.debug(f"_send_spans() POST request starting to {url}")
-                async with session.post(url, json=spans, headers=headers) as response:
+                async with session.post(url, data=data, headers=headers) as response:
                     logger.debug(f"_send_spans() received response: status={response.status}")
                     if not response.ok:
                         error_text = await response.text()

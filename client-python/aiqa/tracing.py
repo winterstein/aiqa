@@ -156,13 +156,31 @@ def _prepare_and_filter_input(
     ignore_input: Optional[List[str]],
 ) -> Any:
     """Prepare and filter input for span attributes."""
-    input_data = _prepare_input(args, kwargs)
+    # Handle "self" in ignore_input by skipping the first argument
+    filtered_args = args
+    filtered_kwargs = kwargs.copy() if kwargs else {}
+    filtered_ignore_input = ignore_input
+    if ignore_input and "self" in ignore_input:
+        # Remove "self" from ignore_input list (we'll handle it specially)
+        filtered_ignore_input = [key for key in ignore_input if key != "self"]
+        # Skip first arg if it exists (typically self for bound methods)
+        if args:
+            filtered_args = args[1:]
+        # Also remove "self" from kwargs if present
+        if "self" in filtered_kwargs:
+            del filtered_kwargs["self"]
+    
+    input_data = _prepare_input(filtered_args, filtered_kwargs)
     if filter_input:
         input_data = filter_input(input_data)
-    if ignore_input and isinstance(input_data, dict):
-        for key in ignore_input:
+    if filtered_ignore_input and isinstance(input_data, dict):
+        for key in filtered_ignore_input:
             if key in input_data:
                 del input_data[key]
+    # Also handle case where input_data is just self (single value, not dict)
+    # If we filtered out self and there are no remaining args/kwargs, return None
+    if ignore_input and "self" in ignore_input and not filtered_args and not filtered_kwargs:
+        return None
     return input_data
 
 

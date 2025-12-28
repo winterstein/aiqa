@@ -206,7 +206,7 @@ export function extractBlocks(text: string): Block[] {
 	}
 	const textStr = String(text);
 	
-	// Blocks must start on a new line.
+	// Blocks MUST start on a new line. This is a deliberate design limitation to avoid false-positive detection of blocks in the middle of text.
 	// Look for xml blocks which start a line with <tag and end with </tag> 
 	// or json blocks	
 	const blockStart = /^(<[a-zA-Z][a-zA-Z0-9_]*|{|\[)/gm;
@@ -223,6 +223,12 @@ export function extractBlocks(text: string): Block[] {
 	for (let i = 0; i < matches.length; i++) {
 		const match = matches[i] as RegExpMatchArray;
 		const matchIndex = match.index!;
+		
+		// Skip matches that are already inside a previously processed block
+		// (e.g., nested XML/JSON that starts on a new line)
+		if (matchIndex < lastIndex) {
+			continue;
+		}
 		
 		// Add text block before this match if there's any text
 		if (matchIndex > lastIndex) {

@@ -1,7 +1,8 @@
 import React from 'react';
+import { CaretDownIcon, CaretRightIcon } from "@phosphor-icons/react";
 
 /**
- * A simple expand/collapse control that shows ▼ when expanded and ▶ when collapsed.
+ * A simple expand/collapse control that shows a caret icon.
  * If hasChildren is false, shows a spacer instead of a button.
  */
 export default function ExpandCollapseControl({
@@ -25,12 +26,14 @@ export default function ExpandCollapseControl({
 					background: 'none', 
 					border: 'none', 
 					cursor: 'pointer',
-					fontSize: '14px',
 					padding: '2px 5px',
-					flexShrink: 0
+					flexShrink: 0,
+					display: 'flex',
+					alignItems: 'center'
 				}}
+				title={isExpanded ? "Collapse" : "Expand"}
 			>
-				{isExpanded ? '▼' : '▶'}
+				{isExpanded ? <CaretDownIcon size={14} /> : <CaretRightIcon size={14} />}
 			</button>
 		);
 	}
