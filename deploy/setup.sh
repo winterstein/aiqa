@@ -42,6 +42,12 @@ if [ ! -L /etc/nginx/sites-enabled/webapp ]; then
     sudo ln -s /etc/nginx/sites-available/webapp /etc/nginx/sites-enabled/
 fi
 
+# Install nginx config for server API domain (optional)
+# sudo cp deploy/server.aiqa.nginx.conf /etc/nginx/sites-available/server
+# if [ ! -L /etc/nginx/sites-enabled/server ]; then
+#     sudo ln -s /etc/nginx/sites-available/server /etc/nginx/sites-enabled/
+# fi
+
 # Install nginx config for website (optional)
 # sudo cp deploy/website-aiqa.nginx.conf /etc/nginx/sites-available/website
 # if [ ! -L /etc/nginx/sites-enabled/website ]; then
@@ -51,6 +57,7 @@ fi
 # Create nginx log directories (required before nginx can start)
 sudo mkdir -p /var/log/nginx/app.aiqa.winterwell.com
 sudo mkdir -p /var/log/nginx/aiqa.winterwell.com
+sudo mkdir -p /var/log/nginx/server.aiqa.winterwell.com  # if using server domain
 sudo chown -R www-data:www-data /var/log/nginx/
 
 # Disable default nginx site if it exists

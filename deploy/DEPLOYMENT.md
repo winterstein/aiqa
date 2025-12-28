@@ -31,13 +31,18 @@ sudo cp deploy/aiqa-server.service /etc/systemd/system/
 sudo cp deploy/app.aiqa.nginx.conf /etc/nginx/sites-available/webapp
 sudo ln -s /etc/nginx/sites-available/webapp /etc/nginx/sites-enabled/
 
-# For website (optional)
+# For server API domain (optional - provides direct access via server.aiqa.winterwell.com)
+# sudo cp deploy/server.aiqa.nginx.conf /etc/nginx/sites-available/server
+# sudo ln -s /etc/nginx/sites-available/server /etc/nginx/sites-enabled/
+
+# For website (optional - proxies to server if file not found)
 # sudo cp deploy/website-aiqa.nginx.conf /etc/nginx/sites-available/website
 # sudo ln -s /etc/nginx/sites-available/website /etc/nginx/sites-enabled/
 
 # Create nginx log directories (REQUIRED - nginx will fail to start without these)
 sudo mkdir -p /var/log/nginx/app.aiqa.winterwell.com
 sudo mkdir -p /var/log/nginx/aiqa.winterwell.com
+sudo mkdir -p /var/log/nginx/server.aiqa.winterwell.com  # if using server domain
 sudo chown -R www-data:www-data /var/log/nginx/
 
 # Test nginx configuration
@@ -47,7 +52,43 @@ sudo nginx -t
 sudo systemctl daemon-reload
 ```
 
-### 3. Configure environment variables
+### 3. Configure DNS
+
+Before the webapp and server domains will be accessible, you need to create DNS A records pointing to your server's IP address.
+
+**For the webapp domain** (`app.aiqa.winterwell.com` or your custom domain):
+- **Cloudflare DNS**: Create an A record with:
+  - Name: `app.aiqa` (this creates `app.aiqa.winterwell.com`)
+  - Type: A
+  - Content: Your server's IP address (e.g., `65.109.140.6`)
+- **Other DNS providers**: Create an A record with name `app` in the `aiqa` subdomain zone, or `app.aiqa` if managing from root domain
+- If using a different subdomain structure, adjust the `server_name` in `app.aiqa.nginx.conf` accordingly
+
+**For the server API domain** (optional, for direct API access):
+- **Cloudflare DNS**: 
+  - Option 1: `server.aiqa.winterwell.com` - Create an A record with name `server.aiqa` → your server's IP address
+  - Option 2: `aiqa-server.winterwell.com` - Create an A record with name `aiqa-server` → your server's IP address
+- **Wildcard option** (Cloudflare): Instead of individual records, create a single wildcard A record:
+  - Name: `*.aiqa`
+  - Type: A
+  - Content: Your server's IP address
+  - This covers all `*.aiqa.winterwell.com` subdomains (app, server, etc.). Specific records take precedence over wildcards.
+- Note: If you want a dedicated server domain (`server.aiqa.winterwell.com`), install the nginx configuration from `deploy/server.aiqa.nginx.conf` (see step 2 above). Otherwise, the server API is accessible via:
+  - The main domain (`aiqa.winterwell.com`) which proxies to the server as a fallback when static files aren't found
+  - Direct access via `http://localhost:4001` on the server itself
+
+**Verify DNS resolution:**
+```bash
+nslookup app.aiqa.winterwell.com
+nslookup server.aiqa.winterwell.com  # if using server subdomain
+# or
+dig app.aiqa.winterwell.com +short
+dig server.aiqa.winterwell.com +short
+```
+
+DNS propagation typically takes a few minutes to a few hours. The domain must resolve before HTTPS certificates can be issued (if using Let's Encrypt) and before the domains will be accessible.
+
+### 4. Configure environment variables
 
 ```bash
 # Copy and edit server environment file
@@ -56,7 +97,7 @@ nano /opt/aiqa/server/.env
 # Edit with your database credentials, port, etc.
 ```
 
-### 4. Set up GitHub Secrets and Variables
+### 5. Set up GitHub Secrets and Variables
 
 In your GitHub repository, go to Settings → Secrets and variables → Actions:
 
@@ -80,7 +121,7 @@ ssh-keygen -t ed25519 -C "github-actions" -f ~/.ssh/github_actions
 # Use the private key content as DEPLOY_SSH_KEY secret
 ```
 
-### 5. Enable and start services
+### 6. Enable and start services
 
 ```bash
 # Enable server service to start on boot
@@ -190,6 +231,7 @@ Create the required log directories:
 # Create log directories for all nginx sites
 sudo mkdir -p /var/log/nginx/app.aiqa.winterwell.com
 sudo mkdir -p /var/log/nginx/aiqa.winterwell.com
+sudo mkdir -p /var/log/nginx/server.aiqa.winterwell.com  # if using server domain
 sudo chown -R www-data:www-data /var/log/nginx/
 
 # Test nginx configuration
@@ -249,7 +291,18 @@ By default:
 
 **Note:** Port 4000 is only used in development mode (`pnpm dev`). In production, nginx serves the webapp on standard HTTP/HTTPS ports.
 
-If the webapp and server are on the same server, the webapp can connect directly using `VITE_AIQA_SERVER_URL=http://localhost:4001`. 
+### Server API Access Methods
 
-If they're on different servers or you want to use a domain, configure accordingly. The server has CORS enabled, so cross-origin requests are allowed.
+The server API can be accessed via three methods:
+
+1. **Direct localhost access**: `http://localhost:4001` (on the server itself)
+2. **Via website proxy**: `https://aiqa.winterwell.com` (proxies to server when static files aren't found)
+3. **Via dedicated server domain**: `https://server.aiqa.winterwell.com` (requires DNS A record and nginx config from `deploy/server.aiqa.nginx.conf`)
+
+**For webapp configuration:**
+- If the webapp and server are on the same server, use `VITE_AIQA_SERVER_URL=http://localhost:4001` for direct access
+- If using the website proxy, use `VITE_AIQA_SERVER_URL=https://aiqa.winterwell.com`
+- If using the dedicated server domain, use `VITE_AIQA_SERVER_URL=https://server.aiqa.winterwell.com`
+
+The server has CORS enabled, so cross-origin requests are allowed from any of these endpoints.
 

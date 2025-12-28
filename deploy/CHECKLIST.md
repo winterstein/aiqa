@@ -33,8 +33,10 @@ Use this checklist to verify your deployment setup is complete.
 - [ ] Server service file installed: `/etc/systemd/system/aiqa-server.service`
 - [ ] Nginx config installed: `/etc/nginx/sites-available/webapp` (from `deploy/app.aiqa.nginx.conf`)
 - [ ] Nginx config symlinked: `/etc/nginx/sites-enabled/webapp`
+- [ ] Server nginx config installed (optional): `/etc/nginx/sites-available/server` (from `deploy/server.aiqa.nginx.conf`)
+- [ ] Server nginx config symlinked (optional): `/etc/nginx/sites-enabled/server`
 - [ ] Website nginx config installed (optional): `/etc/nginx/sites-available/website` (from `deploy/website-aiqa.nginx.conf`)
-- [ ] Nginx log directories created: `/var/log/nginx/app.aiqa.winterwell.com` and `/var/log/nginx/aiqa.winterwell.com`
+- [ ] Nginx log directories created: `/var/log/nginx/app.aiqa.winterwell.com`, `/var/log/nginx/aiqa.winterwell.com`, and `/var/log/nginx/server.aiqa.winterwell.com` (if using server domain)
 - [ ] Website nginx config symlinked (optional): `/etc/nginx/sites-enabled/website`
 - [ ] Default nginx site disabled (if exists)
 - [ ] Nginx config tested: `sudo nginx -t`
