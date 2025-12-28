@@ -32,6 +32,7 @@ import {
   addOrganisationMember,
   removeOrganisationMember,
   getOrganisationMembers,
+  getOrganisationsForUser,
 } from './db/db_sql.js';
 import {
   bulkInsertExamples,
@@ -88,21 +89,25 @@ fastify.addHook('onRequest', async (request, reply) => {
 });
 
 // Health check
+// Security: Public endpoint - no authentication required.
 fastify.get('/health', async () => {
   return { status: 'ok' };
 });
 
 // Version endpoint
+// Security: Public endpoint - no authentication required.
 fastify.get('/version', async () => {
   return versionData;
 });
 
 // ===== ORGANISATION ENDPOINTS (PostgreSQL) =====
+// Security: Authenticated users only (via authenticate middleware). No organisation membership check - any authenticated user can create organisations.
 fastify.post('/organisation', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const org = await createOrganisation(request.body as any);
   return org;
 });
 
+// Security: Authenticated users only. No membership check - any authenticated user can view any organisation by ID.
 fastify.get('/organisation/:id', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const { id } = request.params as { id: string };
   const org = await getOrganisation(id);
@@ -113,13 +118,19 @@ fastify.get('/organisation/:id', { preHandler: authenticate }, async (request: A
   return org;
 });
 
+// Security: Authenticated users only. Filtered to only return organisations where user is a member (via getOrganisationsForUser in endpoint handler).
 fastify.get('/organisation', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const query = (request.query as any).q as string | undefined;
   const searchQuery = query ? new SearchQuery(query) : null;
-  const orgs = await listOrganisations(searchQuery);
+  if (!request.userId) {
+    reply.code(401).send({ error: 'User ID not found in authenticated request' });
+    return;
+  }
+  const orgs = await getOrganisationsForUser(request.userId, searchQuery);
   return orgs;
 });
 
+// Security: Authenticated users only. No membership check - any authenticated user can update any organisation by ID.
 fastify.put('/organisation/:id', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const { id } = request.params as { id: string };
   const org = await updateOrganisation(id, request.body as any);
@@ -130,6 +141,7 @@ fastify.put('/organisation/:id', { preHandler: authenticate }, async (request: A
   return org;
 });
 
+// Security: Authenticated users only. No membership check - any authenticated user can delete any organisation by ID.
 fastify.delete('/organisation/:id', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const { id } = request.params as { id: string };
   const deleted = await deleteOrganisation(id);
@@ -141,6 +153,7 @@ fastify.delete('/organisation/:id', { preHandler: authenticate }, async (request
 });
 
 // ===== USER ENDPOINTS (PostgreSQL) =====
+// Security: JWT token required (via authenticateWithJwtFromHeader). User can only create themselves (email/sub from JWT).
 fastify.post('/user', async (request, reply) => {
   // get details from JWT token
   let jwtToken = await authenticateWithJwtFromHeader(request);
@@ -161,6 +174,7 @@ fastify.post('/user', async (request, reply) => {
   return user;
 });
 
+// Security: No authentication required. Any user can view any user by ID (or use "jwt" to get own user via JWT token).
 fastify.get('/user/:id', async (request, reply) => {
 	try {
 		let jwtToken = await authenticateWithJwtFromHeader(request);
@@ -196,6 +210,7 @@ fastify.get('/user/:id', async (request, reply) => {
 	}
 });
 
+// Security: Authenticated users only. No organisation filtering - returns all users matching search query.
 fastify.get('/user', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const query = (request.query as any).q as string | undefined;
   const searchQuery = query ? new SearchQuery(query) : null;
@@ -203,6 +218,7 @@ fastify.get('/user', { preHandler: authenticate }, async (request: Authenticated
   return users;
 });
 
+// Security: JWT token required. Users can only update their own profile (verified by matching JWT userId/sub or email to target user).
 fastify.put('/user/:id', async (request, reply) => {
 	let jwtToken = await authenticateWithJwtFromHeader(request);
 	if (!jwtToken) {
@@ -240,6 +256,7 @@ fastify.put('/user/:id', async (request, reply) => {
   return user;
 });
 
+// Security: Authenticated users only. No ownership check - any authenticated user can delete any user by ID.
 fastify.delete('/user/:id', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const { id } = request.params as { id: string };
   const deleted = await deleteUser(id);
@@ -251,6 +268,7 @@ fastify.delete('/user/:id', { preHandler: authenticate }, async (request: Authen
 });
 
 // ===== API KEY ENDPOINTS (PostgreSQL) =====
+// Security: Authenticated users only. Organisation membership verified by authenticate middleware when organisation query param provided. Only accepts key_hash (not plaintext).
 fastify.post('/api-key', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const body = request.body as any;
   
@@ -276,6 +294,7 @@ fastify.post('/api-key', { preHandler: authenticate }, async (request: Authentic
   return apiKey;
 });
 
+// Security: Authenticated users only. No organisation check - any authenticated user can view any API key by ID.
 fastify.get('/api-key/:id', {preHandler: authenticate}, async (request: AuthenticatedRequest, reply) => {
   const { id } = request.params as { id: string };
   const apiKey = await getApiKey(id);
@@ -286,6 +305,7 @@ fastify.get('/api-key/:id', {preHandler: authenticate}, async (request: Authenti
   return apiKey;
 });
 
+// Security: Authenticated users only. Organisation membership verified by authenticate middleware. Results filtered by organisationId in database (listApiKeys).
 fastify.get('/api-key', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const organisationId = (request.query as any).organisation as string | undefined;
   if (!organisationId) {
@@ -298,6 +318,7 @@ fastify.get('/api-key', { preHandler: authenticate }, async (request: Authentica
   return apiKeys;
 });
 
+// Security: Authenticated users only. No organisation check - any authenticated user can update any API key by ID.
 fastify.put('/api-key/:id', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const { id } = request.params as { id: string };
   const apiKey = await updateApiKey(id, request.body as any);
@@ -308,6 +329,7 @@ fastify.put('/api-key/:id', { preHandler: authenticate }, async (request: Authen
   return apiKey;
 });
 
+// Security: Authenticated users only. No organisation check - any authenticated user can delete any API key by ID.
 fastify.delete('/api-key/:id', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const { id } = request.params as { id: string };
   const deleted = await deleteApiKey(id);
@@ -319,6 +341,7 @@ fastify.delete('/api-key/:id', { preHandler: authenticate }, async (request: Aut
 });
 
 // ===== DATASET ENDPOINTS (PostgreSQL) =====
+// Security: Authenticated users only. Organisation membership verified by authenticate middleware when organisation query param provided.
 fastify.post('/dataset', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
 	const organisationId = (request.query as any).organisation as string | undefined;
   if (!organisationId) {
@@ -329,6 +352,7 @@ fastify.post('/dataset', { preHandler: authenticate }, async (request: Authentic
   return dataset;
 });
 
+// Security: Authenticated users only. No organisation check - any authenticated user can view any dataset by ID.
 fastify.get('/dataset/:id', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const { id } = request.params as { id: string };
   const dataset = await getDataset(id);
@@ -339,6 +363,7 @@ fastify.get('/dataset/:id', { preHandler: authenticate }, async (request: Authen
   return dataset;
 });
 
+// Security: Authenticated users only. Organisation membership verified by authenticate middleware. Results filtered by organisationId in database (listDatasets).
 fastify.get('/dataset', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const organisationId = (request.query as any).organisation as string | undefined;
   if (!organisationId) {
@@ -351,6 +376,7 @@ fastify.get('/dataset', { preHandler: authenticate }, async (request: Authentica
   return datasets;
 });
 
+// Security: Authenticated users only. No organisation check - any authenticated user can update any dataset by ID.
 fastify.put('/dataset/:id', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const { id } = request.params as { id: string };
   const dataset = await updateDataset(id, request.body as any);
@@ -361,6 +387,7 @@ fastify.put('/dataset/:id', { preHandler: authenticate }, async (request: Authen
   return dataset;
 });
 
+// Security: Authenticated users only. No organisation check - any authenticated user can delete any dataset by ID.
 fastify.delete('/dataset/:id', { preHandler: authenticate }, async (request, reply) => {
   const { id } = request.params as { id: string };
   const deleted = await deleteDataset(id);
@@ -372,6 +399,7 @@ fastify.delete('/dataset/:id', { preHandler: authenticate }, async (request, rep
 });
 
 // ===== EXAMPLE ENDPOINTS (ElasticSearch) =====
+// Security: Authenticated users only. Organisation set from authenticate middleware (request.organisation). Examples stored with organisation field.
 fastify.post('/example', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const organisation = request.organisation!;
   const examples = request.body as Example | Example[];
@@ -416,6 +444,7 @@ fastify.post('/example', { preHandler: authenticate }, async (request: Authentic
   return { success: true, count: examplesWithOrg.length };
 });
 
+// Security: Authenticated users only. Organisation membership verified by authenticate middleware. Results filtered by organisationId in Elasticsearch (searchExamples).
 fastify.get('/example', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
   const organisationId = (request.query as any).organisation as string | undefined;
   if (!organisationId) {
@@ -439,12 +468,14 @@ fastify.get('/example', { preHandler: authenticate }, async (request: Authentica
 });
 
 // ===== ORGANISATION MEMBER ENDPOINTS =====
+// Security: Authenticated users only. No membership check - any authenticated user can add members to any organisation.
 fastify.post('/organisation/:organisationId/member/:userId',{ preHandler: authenticate }, async (request, reply) => {
   const { organisationId, userId } = request.params as { organisationId: string; userId: string };
   const organisation = await addOrganisationMember(organisationId, userId);
   return organisation;
 });
 
+// Security: Authenticated users only. No membership check - any authenticated user can remove members from any organisation.
 fastify.delete('/organisation/:organisationId/member/:userId', { preHandler: authenticate }, async (request, reply) => {
   const { organisationId, userId } = request.params as { organisationId: string; userId: string };
   const deleted = await removeOrganisationMember(organisationId, userId);
@@ -455,6 +486,7 @@ fastify.delete('/organisation/:organisationId/member/:userId', { preHandler: aut
   return { success: true };
 });
 
+// Security: Authenticated users only. No membership check - any authenticated user can view members of any organisation.
 fastify.get('/organisation/:organisationId/member', { preHandler: authenticate }, async (request, reply) => {
   const { organisationId } = request.params as { organisationId: string };
   const members = await getOrganisationMembers(organisationId);

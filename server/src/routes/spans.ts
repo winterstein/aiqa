@@ -10,6 +10,7 @@ import { addTokenCost } from '../token_cost.js';
  */
 export async function registerSpanRoutes(fastify: FastifyInstance): Promise<void> {
   // ===== SPAN ENDPOINTS (ElasticSearch) =====
+  // Security: Authenticated users only. Organisation set from authenticate middleware (request.organisation). Spans stored with organisation field.
   fastify.post('/span', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const organisation = request.organisation!;
     const spans = request.body as Span | Span[];
@@ -40,6 +41,7 @@ export async function registerSpanRoutes(fastify: FastifyInstance): Promise<void
    * - offset: optional - pagination offset (default: 0)
    * - fields: optional - comma-separated list of fields to include.
    * - exclude: optional - comma-separated list of fields to exclude.
+   * Security: Authenticated users only. Organisation membership verified by authenticate middleware. Results filtered by organisationId in Elasticsearch (searchSpans).
    */
   fastify.get('/span', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const organisationId = (request.query as any).organisation as string | undefined;

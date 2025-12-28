@@ -15,7 +15,7 @@ import {
 	Experiment,
 } from '../common/types/index.js';
 import SearchQuery from '../common/SearchQuery.js';
-import { loadSchema, generatePostgresTable } from '../common/utils/schema-loader.js';
+import { loadSchema, generatePostgresTable, getTypeDefinition } from '../common/utils/schema-loader.js';
 import { searchQueryToSqlWhereClause } from './sql_query.js';
 
 let pool: Pool | null = null;
@@ -38,9 +38,15 @@ function getAllowedFieldsFromSchema(typeName: string): Set<string> {
 		throw new Error(`Schema not found for type: ${typeName}`);
 	}
 
-	// Accept top-level keys as allowed fields, except for 'id', 'created', 'updated' (managed by DB)
+	// Get the actual type definition from the schema
+	const typeDef = getTypeDefinition(schema, typeName);
+	if (!typeDef || !typeDef.properties) {
+		throw new Error(`Could not find type definition for ${typeName}`);
+	}
+
+	// Accept property keys as allowed fields, except for 'id', 'created', 'updated' (managed by DB)
 	const skip = new Set(['id', 'created', 'updated']);
-	const allowed = Object.keys(schema)
+	const allowed = Object.keys(typeDef.properties)
 		.filter(key => !skip.has(key));
 	return new Set(allowed);
 }
@@ -636,10 +642,17 @@ export async function getOrganisationMembers(organisationId: string): Promise<Us
 /**
  * Find all organisations that a user belongs to (where user ID is in members array).
  * Returns empty array if user is not a member of any organisation.
+ * @param searchQuery - Optional Gmail-style search query to filter results (e.g. "name:acme")
  */
-export async function getOrganisationsForUser(userId: string): Promise<Organisation[]> {
+export async function getOrganisationsForUser(userId: string, searchQuery?: SearchQuery | string | null): Promise<Organisation[]> {
+	const membershipClause = `$1 = ANY(members)`;
+	const searchClause = searchQueryToSqlWhereClause(searchQuery);
+	const whereClause = searchClause === '1=1' 
+		? membershipClause 
+		: `${membershipClause} AND (${searchClause})`;
+	
 	const result = await doQuery<Organisation>(
-		`SELECT * FROM organisations WHERE $1 = ANY(members)`,
+		`SELECT * FROM organisations WHERE ${whereClause} ORDER BY created DESC`,
 		[userId]
 	);
 	return result.rows.map(transformOrganisation);

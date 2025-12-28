@@ -153,12 +153,14 @@ function updateSummaryResults(summaryResults: Record<string, MetricStats> | unde
  */
 export async function registerExperimentRoutes(fastify: FastifyInstance): Promise<void> {
   // Create experiment
+  // Security: Authenticated users only. Organisation membership verified by authenticate middleware when organisation query param provided.
   fastify.post('/experiment', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const experiment = await createExperiment(request.body as any);
     return experiment;
   });
 
   // Get experiment by ID
+  // Security: Authenticated users only. No organisation check - any authenticated user can view any experiment by ID.
   fastify.get('/experiment/:id', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const { id } = request.params as { id: string };
     const experiment = await getExperiment(id);
@@ -170,6 +172,7 @@ export async function registerExperimentRoutes(fastify: FastifyInstance): Promis
   });
 
   // List experiments
+  // Security: Authenticated users only. Organisation membership verified by authenticate middleware. Results filtered by organisationId in database (listExperiments).
   fastify.get('/experiment', { preHandler: authenticate }, async (request, reply) => {
     const organisationId = (request.query as any).organisation as string | undefined;
     if (!organisationId) {
@@ -183,6 +186,7 @@ export async function registerExperimentRoutes(fastify: FastifyInstance): Promis
   });
 
   // Update experiment
+  // Security: Authenticated users only. No organisation check - any authenticated user can update any experiment by ID.
   fastify.put('/experiment/:id', { preHandler: authenticate }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const experiment = await updateExperiment(id, request.body as any);
@@ -194,6 +198,7 @@ export async function registerExperimentRoutes(fastify: FastifyInstance): Promis
   });
 
   // Delete experiment
+  // Security: Authenticated users only. No organisation check - any authenticated user can delete any experiment by ID.
   fastify.delete('/experiment/:id', { preHandler: authenticate }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const deleted = await deleteExperiment(id);
@@ -209,6 +214,7 @@ export async function registerExperimentRoutes(fastify: FastifyInstance): Promis
    * POST body: { output, traceId, scores }
    * For each metric (from dataset or example), if scores has a value, use it;
    * otherwise the server runs scoring for that metric.
+   * Security: Authenticated users only. Organisation membership verified by authenticate middleware. Verifies experiment.organisation matches request.organisation (endpoint handler).
    */
   fastify.post('/experiment/:id/example/:exampleid/scoreAndStore', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
     const { id: experimentId, exampleid: exampleId } = request.params as { id: string; exampleid: string };
