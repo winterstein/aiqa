@@ -1,0 +1,54 @@
+
+/**
+BS style support for display:grid
+e.g.
+<div class="gridbox gridbox-md-3">
+defines a 3 column grid
+*/
+
+.gridbox {
+	display: grid;
+	grid-auto-rows: 1fr;
+	grid-column-gap: 1px;
+	grid-row-gap: 1px;
+	// gap sizing, using BS margin/padding sizes e.g. 5=3rem
+	&.gridbox-gap-5 { grid-column-gap: 3rem; grid-row-gap:3rem; }
+	&.gridbox-gap-4 { grid-column-gap:1.5rem; grid-row-gap:1.5rem; }
+	&.gridbox-gap-3 { grid-column-gap:1rem; grid-row-gap:1rem; }
+	&.gridbox-gap-0 { grid-column-gap:0; grid-row-gap:0; }
+}
+
+// all sizes
+.gridbox-1 { grid-template-columns: repeat(1, 1fr); }
+.gridbox-2 { grid-template-columns: repeat(2, 2fr); }
+.gridbox-3 { grid-template-columns: repeat(3, 3fr); }
+.gridbox-4 { grid-template-columns: repeat(4, 4fr); }
+.gridbox-5 { grid-template-columns: repeat(5, 5fr); }
+.gridbox-6 { grid-template-columns: repeat(6, 6fr); }
+.gridbox-7 { grid-template-columns: repeat(7, 7fr); }
+
+// BS sizes
+@media (min-width: 576px) { 
+	.gridbox-sm-1 { grid-template-columns: repeat(1, 1fr); }
+	.gridbox-sm-2 { grid-template-columns: repeat(2, 2fr); }
+	.gridbox-sm-3 { grid-template-columns: repeat(3, 3fr); }
+	.gridbox-sm-4 { grid-template-columns: repeat(4, 4fr); }
+	.gridbox-sm-5 { grid-template-columns: repeat(5, 5fr); }
+	.gridbox-sm-6 { grid-template-columns: repeat(6, 6fr); }
+	.gridbox-sm-7 { grid-template-columns: repeat(7, 7fr); }
+}
+// Medium devices (tablets, 768px and up)
+@media (min-width: 768px) { 
+	.gridbox-md-1 { grid-template-columns: repeat(1, 1fr); }
+	.gridbox-md-2 { grid-template-columns: repeat(2, 2fr); }
+	.gridbox-md-3 { grid-template-columns: repeat(3, 3fr); }
+	.gridbox-md-4 { grid-template-columns: repeat(4, 4fr); }
+	.gridbox-md-5 { grid-template-columns: repeat(5, 5fr); }
+	.gridbox-md-6 { grid-template-columns: repeat(6, 6fr); }
+	.gridbox-md-7 { grid-template-columns: repeat(7, 7fr); }
+}
+
+// Large devices (desktops, 992px and up)
+@media (min-width: 992px) { }
+// Extra large devices (large desktops, 1200px and up)
+@media (min-width: 1200px) { }
