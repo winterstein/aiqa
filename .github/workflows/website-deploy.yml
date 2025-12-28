@@ -18,6 +18,28 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install LESS compiler
+        run: npm install -g less
+
+      - name: Download Jerbil
+        working-directory: ./website
+        run: wget -q https://www.winterwell.com/software/jerbil-all.jar
+
+      - name: Build website with Jerbil
+        working-directory: ./website
+        run: java -jar jerbil-all.jar
+
       - name: Deploy to server
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -38,7 +60,5 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ vars.DEPLOY_PORT || 22 }}
           script: |
-            sudo mkdir -p /opt/aiqa/website/webroot
-            sudo chown -R www-data:www-data /opt/aiqa/website
             sudo systemctl reload nginx
             sudo systemctl status nginx
