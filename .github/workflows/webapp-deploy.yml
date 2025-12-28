@@ -10,7 +10,10 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    
+    environment: prod
+    env:
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -32,19 +35,19 @@ jobs:
       - name: Build webapp
         working-directory: ./webapp
         env:
-          VITE_AIQA_SERVER_URL: ${{ secrets.VITE_AIQA_SERVER_URL || 'http://localhost:4001' }}
-          VITE_AUTH0_DOMAIN: ${{ secrets.VITE_AUTH0_DOMAIN }}
+          VITE_AIQA_SERVER_URL: ${{ vars.VITE_AIQA_SERVER_URL }}
+          VITE_AUTH0_DOMAIN: ${{ vars.VITE_AUTH0_DOMAIN }}
           VITE_AUTH0_CLIENT_ID: ${{ secrets.VITE_AUTH0_CLIENT_ID }}
-          VITE_AUTH0_AUDIENCE: ${{ secrets.VITE_AUTH0_AUDIENCE }}
+          VITE_AUTH0_AUDIENCE: ${{ vars.VITE_AUTH0_AUDIENCE }}
         run: pnpm run build
 
       - name: Deploy to server
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
+          host: $DEPLOY_HOST }}
+          username: $DEPLOY_USER
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          port: $DEPLOY_PORT || 22
           source: "webapp/dist"
           target: "/opt/aiqa/webapp"
           strip_components: 1

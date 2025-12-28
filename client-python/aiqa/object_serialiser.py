@@ -32,8 +32,8 @@ AIQA_MAX_OBJECT_STR_CHARS = toNumber(os.getenv("AIQA_MAX_OBJECT_STR_CHARS", "1m"
 # Data filters configuration
 def _get_enabled_filters() -> Set[str]:
     """Get set of enabled filter names from AIQA_DATA_FILTERS env var."""
-    filters_env = os.getenv("AIQA_DATA_FILTERS", "RemovePasswords, RemoveJWT")
-    if not filters_env:
+    filters_env = os.getenv("AIQA_DATA_FILTERS", "RemovePasswords, RemoveJWT, RemoveAuthHeaders, RemoveAPIKeys")
+    if not filters_env or filters_env.lower() == "false":
         return set()
     return {f.strip() for f in filters_env.split(",") if f.strip()}
 

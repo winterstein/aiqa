@@ -10,9 +10,10 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: prod
     env:
-      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
