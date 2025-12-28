@@ -17,7 +17,7 @@ echo ""
 
 # Check if nginx config exists
 echo "3. Checking nginx configuration..."
-NGINX_CONFIG_FILE=app.aiqa.nginx.conf
+NGINX_CONFIG_FILE=app-aiqa.nginx.conf
 if [ -L /etc/nginx/sites-enabled/$NGINX_CONFIG_FILE ]; then
     echo "✓ Site config is enabled"
 elif [ -f /etc/nginx/sites-available/$NGINX_CONFIG_FILE ]; then

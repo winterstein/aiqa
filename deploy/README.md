@@ -6,7 +6,8 @@ This directory contains all files needed for 24x7 deployment of the AIQA server 
 
 ### Service Files
 - **aiqa-server.service** - Systemd service file for the server (auto-restart on failure)
-- **app.aiqa.nginx.conf** - Nginx site configuration for serving the webapp (recommended)
+- **app-aiqa.nginx.conf** - Nginx site configuration for serving the webapp (recommended)
+- **server-aiqa.nginx.conf** - Nginx site configuration for serving the server API (optional)
 - **website-aiqa.nginx.conf** - Nginx site configuration for serving the website
 - **aiqa-webapp.optional.service** - Alternative systemd service (optional, uses custom nginx config)
 

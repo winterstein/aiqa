@@ -23,17 +23,19 @@ sudo chown -R $USER:$USER /opt/aiqa
 
 ### 2. Install systemd service files
 
+**Note:** These commands assume you're running from the repository root directory.
+
 ```bash
 # Copy server service file
 sudo cp deploy/aiqa-server.service /etc/systemd/system/
 
 # For webapp, use standard nginx service (recommended)
-sudo cp deploy/app.aiqa.nginx.conf /etc/nginx/sites-available/webapp
-sudo ln -s /etc/nginx/sites-available/webapp /etc/nginx/sites-enabled/
+sudo cp deploy/app-aiqa.nginx.conf /etc/nginx/sites-available/app-aiqa.nginx.conf
+sudo ln -s /etc/nginx/sites-available/app-aiqa.nginx.conf /etc/nginx/sites-enabled/
 
 # For server API domain (optional - provides direct access via server-aiqa.winterwell.com)
-# sudo cp deploy/server.aiqa.nginx.conf /etc/nginx/sites-available/server
-# sudo ln -s /etc/nginx/sites-available/server /etc/nginx/sites-enabled/
+# sudo cp deploy/server-aiqa.nginx.conf /etc/nginx/sites-available/server-aiqa.nginx.conf
+# sudo ln -s /etc/nginx/sites-available/server-aiqa.nginx.conf /etc/nginx/sites-enabled/
 
 # For website (optional - proxies to server if file not found)
 # sudo cp deploy/website-aiqa.nginx.conf /etc/nginx/sites-available/website
@@ -62,7 +64,7 @@ Before the webapp and server domains will be accessible, you need to create DNS 
   - Type: A
   - Content: Your server's IP address (e.g., `65.109.140.6`)
 - **Other DNS providers**: Create an A record with name `app-aiqa` pointing to your server's IP address
-- If using a different subdomain structure, adjust the `server_name` in `app.aiqa.nginx.conf` accordingly
+- If using a different subdomain structure, adjust the `server_name` in `app-aiqa.nginx.conf` accordingly
 
 **For the server API domain** (optional, for direct API access):
 - **Cloudflare DNS**: 
@@ -72,7 +74,7 @@ Before the webapp and server domains will be accessible, you need to create DNS 
   - Type: A
   - Content: Your server's IP address
   - This covers all `*.winterwell.com` subdomains (app-aiqa, server-aiqa, etc.). Specific records take precedence over wildcards.
-- Note: If you want a dedicated server domain (`server-aiqa.winterwell.com`), install the nginx configuration from `deploy/server.aiqa.nginx.conf` (see step 2 above). Otherwise, the server API is accessible via:
+- Note: If you want a dedicated server domain (`server-aiqa.winterwell.com`), install the nginx configuration from `deploy/server-aiqa.nginx.conf` (see step 2 above). Otherwise, the server API is accessible via:
   - The main domain (`aiqa.winterwell.com`) which proxies to the server as a fallback when static files aren't found
   - Direct access via `http://localhost:4001` on the server itself
 
@@ -208,7 +210,7 @@ sudo systemctl status nginx
 ### Port conflicts
 
 - Server defaults to port 4001 (set via `PORT` in `.env`)
-- Webapp is served by nginx on ports 80 (HTTP) and 443 (HTTPS) - see `app.aiqa.nginx.conf`
+- Webapp is served by nginx on ports 80 (HTTP) and 443 (HTTPS) - see `app-aiqa.nginx.conf`
 - Check if ports are in use: `sudo netstat -tulpn | grep :4001` (server) or `sudo netstat -tulpn | grep :80` (nginx)
 
 ### Permission issues
@@ -296,7 +298,7 @@ The server API can be accessed via three methods:
 
 1. **Direct localhost access**: `http://localhost:4001` (on the server itself)
 2. **Via website proxy**: `https://aiqa.winterwell.com` (proxies to server when static files aren't found)
-3. **Via dedicated server domain**: `https://server-aiqa.winterwell.com` (requires DNS A record and nginx config from `deploy/server.aiqa.nginx.conf`)
+3. **Via dedicated server domain**: `https://server-aiqa.winterwell.com` (requires DNS A record and nginx config from `deploy/server-aiqa.nginx.conf`)
 
 **For webapp configuration:**
 - If the webapp and server are on the same server, use `VITE_AIQA_SERVER_URL=http://localhost:4001` for direct access

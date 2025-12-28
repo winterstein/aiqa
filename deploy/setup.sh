@@ -37,15 +37,15 @@ echo "Installing systemd service files..."
 sudo cp deploy/aiqa-server.service /etc/systemd/system/
 
 # Install nginx config for webapp
-sudo cp deploy/app.aiqa.nginx.conf /etc/nginx/sites-available/webapp
-if [ ! -L /etc/nginx/sites-enabled/webapp ]; then
-    sudo ln -s /etc/nginx/sites-available/webapp /etc/nginx/sites-enabled/
+sudo cp deploy/app-aiqa.nginx.conf /etc/nginx/sites-available/app-aiqa.nginx.conf
+if [ ! -L /etc/nginx/sites-enabled/app-aiqa.nginx.conf ]; then
+    sudo ln -s /etc/nginx/sites-available/app-aiqa.nginx.conf /etc/nginx/sites-enabled/
 fi
 
 # Install nginx config for server API domain (optional)
-# sudo cp deploy/server.aiqa.nginx.conf /etc/nginx/sites-available/server
-# if [ ! -L /etc/nginx/sites-enabled/server ]; then
-#     sudo ln -s /etc/nginx/sites-available/server /etc/nginx/sites-enabled/
+# sudo cp deploy/server-aiqa.nginx.conf /etc/nginx/sites-available/server-aiqa.nginx.conf
+# if [ ! -L /etc/nginx/sites-enabled/server-aiqa.nginx.conf ]; then
+#     sudo ln -s /etc/nginx/sites-available/server-aiqa.nginx.conf /etc/nginx/sites-enabled/
 # fi
 
 # Install nginx config for website (optional)

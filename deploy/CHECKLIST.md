@@ -31,10 +31,10 @@ Use this checklist to verify your deployment setup is complete.
 - [ ] Run `./deploy/setup.sh` on the server (or follow manual steps)
 - [ ] Created `/opt/aiqa/server/.env` with database credentials
 - [ ] Server service file installed: `/etc/systemd/system/aiqa-server.service`
-- [ ] Nginx config installed: `/etc/nginx/sites-available/webapp` (from `deploy/app.aiqa.nginx.conf`)
-- [ ] Nginx config symlinked: `/etc/nginx/sites-enabled/webapp`
-- [ ] Server nginx config installed (optional): `/etc/nginx/sites-available/server` (from `deploy/server.aiqa.nginx.conf`)
-- [ ] Server nginx config symlinked (optional): `/etc/nginx/sites-enabled/server`
+- [ ] Nginx config installed: `/etc/nginx/sites-available/app-aiqa.nginx.conf` (from `deploy/app-aiqa.nginx.conf`)
+- [ ] Nginx config symlinked: `/etc/nginx/sites-enabled/app-aiqa.nginx.conf`
+- [ ] Server nginx config installed (optional): `/etc/nginx/sites-available/server-aiqa.nginx.conf` (from `deploy/server-aiqa.nginx.conf`)
+- [ ] Server nginx config symlinked (optional): `/etc/nginx/sites-enabled/server-aiqa.nginx.conf`
 - [ ] Website nginx config installed (optional): `/etc/nginx/sites-available/website` (from `deploy/website-aiqa.nginx.conf`)
 - [ ] Nginx log directories created: `/var/log/nginx/app-aiqa.winterwell.com`, `/var/log/nginx/aiqa.winterwell.com`, and `/var/log/nginx/server-aiqa.winterwell.com` (if using server domain)
 - [ ] Website nginx config symlinked (optional): `/etc/nginx/sites-enabled/website`
