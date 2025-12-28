@@ -17,31 +17,14 @@ echo ""
 
 # Check if nginx config exists
 echo "3. Checking nginx configuration..."
-if [ -f /etc/nginx/sites-available/webapp ]; then
-    echo "✓ Config file exists: /etc/nginx/sites-available/webapp"
+NGINX_CONFIG_FILE=app.aiqa.nginx.conf
+if [ -L /etc/nginx/sites-enabled/$NGINX_CONFIG_FILE ]; then
+    echo "✓ Site config is enabled"
+elif [ -f /etc/nginx/sites-available/$NGINX_CONFIG_FILE ]; then
+    echo "✗ Site config is NOT enabled (missing symlink)"
+    echo "  Run: sudo ln -s /etc/nginx/sites-available/$NGINX_CONFIG_FILE /etc/nginx/sites-enabled/$NGINX_CONFIG_FILE"
 else
-    echo "✗ Config file MISSING: /etc/nginx/sites-available/webapp"
-    # Try to find the source file
-    if [ -f "$(dirname "$0")/app.aiqa.nginx.conf" ]; then
-        source_file="$(dirname "$0")/app.aiqa.nginx.conf"
-        echo "  Source file found: $source_file"
-        echo "  Run: sudo cp $source_file /etc/nginx/sites-available/webapp"
-    elif [ -f "deploy/app.aiqa.nginx.conf" ]; then
-        echo "  Source file found: deploy/app.aiqa.nginx.conf"
-        echo "  Run: sudo cp deploy/app.aiqa.nginx.conf /etc/nginx/sites-available/webapp"
-    else
-        echo "  Source file: deploy/app.aiqa.nginx.conf (copy from repo to server)"
-        echo "  Run: sudo cp deploy/app.aiqa.nginx.conf /etc/nginx/sites-available/webapp"
-    fi
-fi
-
-if [ -L /etc/nginx/sites-enabled/webapp ]; then
-    echo "✓ Config is enabled (symlinked)"
-elif [ -f /etc/nginx/sites-available/webapp ]; then
-    echo "✗ Config is NOT enabled (missing symlink)"
-    echo "  Run: sudo ln -s /etc/nginx/sites-available/webapp /etc/nginx/sites-enabled/webapp"
-else
-    echo "✗ Config is NOT enabled (config file doesn't exist yet)"
+    echo "✗ Site config is NOT enabled (config file doesn't exist yet)"
 fi
 echo ""
 
@@ -88,7 +71,7 @@ echo ""
 
 # Check SSL certificate
 echo "8. Checking SSL certificate..."
-if [ -f /etc/letsencrypt/live/winterwell.com-0002/fullchain.pem ]; then
+if sudo test -f /etc/letsencrypt/live/winterwell.com-0002/fullchain.pem; then
     echo "✓ SSL certificate file exists"
     sudo openssl x509 -in /etc/letsencrypt/live/winterwell.com-0002/fullchain.pem -noout -subject -dates 2>/dev/null || echo "✗ Certificate file exists but may be invalid"
 else
