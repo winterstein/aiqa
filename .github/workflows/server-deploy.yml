@@ -47,6 +47,56 @@ jobs:
           target: "/opt/aiqa/server"
           strip_components: 1
 
+      - name: Create .env file on remote server
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          SERVER_PORT: ${{ vars.SERVER_PORT || '4001' }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          PGHOST: ${{ secrets.PGHOST }}
+          PGDATABASE: ${{ secrets.PGDATABASE }}
+          PGUSER: ${{ secrets.PGUSER }}
+          PGPASSWORD: ${{ secrets.PGPASSWORD }}
+          PGSSLMODE: ${{ vars.PGSSLMODE || 'require' }}
+          PGCHANNELBINDING: ${{ vars.PGCHANNELBINDING || 'require' }}
+          AZURE_OPENAI_ENDPOINT: ${{ vars.AZURE_OPENAI_ENDPOINT }}
+          ELASTICSEARCH_URL: ${{ vars.ELASTICSEARCH_URL || 'http://localhost:9200' }}
+          SPANS_INDEX: ${{ vars.SPANS_INDEX || 'aiqa_spans' }}
+          SPANS_INDEX_ALIAS: ${{ vars.SPANS_INDEX_ALIAS || 'aiqa_spans_alias' }}
+          DATASET_EXAMPLES_INDEX: ${{ vars.DATASET_EXAMPLES_INDEX || 'aiqa_dataset_examples' }}
+          DATASET_EXAMPLES_INDEX_ALIAS: ${{ vars.DATASET_EXAMPLES_INDEX_ALIAS || 'aiqa_dataset_examples_alias' }}
+          AUTH0_DOMAIN: ${{ vars.AUTH0_DOMAIN }}
+          AUTH0_AUDIENCE: ${{ vars.AUTH0_AUDIENCE }}
+        with:
+          host: ${{ env.DEPLOY_HOST }}
+          username: ${{ env.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          envs: SERVER_PORT,DATABASE_URL,PGHOST,PGDATABASE,PGUSER,PGPASSWORD,PGSSLMODE,PGCHANNELBINDING,ELASTICSEARCH_URL,SPANS_INDEX,SPANS_INDEX_ALIAS,DATASET_EXAMPLES_INDEX,DATASET_EXAMPLES_INDEX_ALIAS,AUTH0_DOMAIN,AUTH0_AUDIENCE,AZURE_OPENAI_ENDPOINT
+          script: |
+            cd /opt/aiqa/server
+            {
+              echo "ENVIRONMENT=production"
+              echo "PORT=${SERVER_PORT:-4001}"
+              [ -n "${DATABASE_URL}" ] && echo "DATABASE_URL=${DATABASE_URL}"
+              echo "PGHOST=${PGHOST}"
+              echo "PGDATABASE=${PGDATABASE}"
+              echo "PGUSER=${PGUSER}"
+              echo "PGPASSWORD=${PGPASSWORD}"
+              echo "PGSSLMODE=${PGSSLMODE:-require}"
+              echo "PGCHANNELBINDING=${PGCHANNELBINDING:-require}"
+              echo "ELASTICSEARCH_URL=${ELASTICSEARCH_URL:-http://localhost:9200}"
+              echo "SPANS_INDEX=${SPANS_INDEX:-aiqa_spans}"
+              echo "SPANS_INDEX_ALIAS=${SPANS_INDEX_AL
+              IAS:-aiqa_spans_alias}"
+              echo "DATASET_EXAMPLES_INDEX=${DATASET_EXAMPLES_INDEX:-aiqa_dataset_examples}"
+              echo "DATASET_EXAMPLES_INDEX_ALIAS=${DATASET_EXAMPLES_INDEX_ALIAS:-aiqa_dataset_examples_alias}"
+              echo "AUTH0_DOMAIN=${AUTH0_DOMAIN}"
+              echo "AUTH0_AUDIENCE=${AUTH0_AUDIENCE}"
+              [ -n "${AZURE_OPENAI_ENDPOINT}" ] && echo "AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}"
+            } > .env
+            sudo chown www-data:www-data .env
+            sudo chmod 600 .env
+
       - name: Install dependencies on remote server
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -56,16 +106,23 @@ jobs:
           port: ${{ secrets.DEPLOY_PORT || 22 }}
           script: |
             cd /opt/aiqa/server
-            if [ ! -f .env ]; then
-              echo "Warning: .env file not found. Please create it manually with your configuration."
-            fi
             # Ensure pnpm is available
             if ! command -v pnpm &> /dev/null; then
               echo "pnpm not found, installing..."
               npm install -g pnpm
             fi
-            pnpm install --prod --frozen-lockfile
+            # Install dependencies
+            pnpm install --prod --no-frozen-lockfile
+            # Fix permissions
             sudo chown -R www-data:www-data /opt/aiqa/server
+            # Verify dist/index.js exists
+            if [ ! -f dist/index.js ]; then
+              echo "ERROR: dist/index.js not found!"
+              exit 1
+            fi
+            # Reload systemd and restart service
+            sudo systemctl daemon-reload
             sudo systemctl restart aiqa-server
-            sudo systemctl status aiqa-server
+            sleep 2
+            sudo systemctl status aiqa-server --no-pager -l
 

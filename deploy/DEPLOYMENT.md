@@ -91,9 +91,13 @@ DNS propagation typically takes a few minutes to a few hours. The domain must re
 
 ### 4. Configure environment variables
 
+**For CI/CD deployments (recommended):** The `.env` file is automatically created by the GitHub Actions workflow from your GitHub secrets and variables. Skip to step 5 to configure them.
+
+**For manual deployments:** You need to create the `.env` file manually:
+
 ```bash
 # Copy and edit server environment file
-cp server/.env.example /opt/aiqa/server/.env
+cp server/env.example /opt/aiqa/server/.env
 nano /opt/aiqa/server/.env
 # Edit with your database credentials, port, etc.
 ```
@@ -103,15 +107,43 @@ nano /opt/aiqa/server/.env
 In your GitHub repository, go to Settings → Secrets and variables → Actions:
 
 **Add as Variables** (Settings → Secrets and variables → Actions → Variables tab):
+
+*Deployment variables:*
 - `DEPLOY_HOST`: Your server's IP address or hostname
 - `DEPLOY_USER`: SSH username (e.g., `ubuntu` or `deploy`)
 - `DEPLOY_PORT`: SSH port (optional, defaults to 22)
+
+*Server environment variables:*
+- `SERVER_PORT`: Server port (optional, defaults to 4001)
+- `PGSSLMODE`: PostgreSQL SSL mode (optional, defaults to `require`)
+- `PGCHANNELBINDING`: PostgreSQL channel binding (optional, defaults to `require`)
+- `ELASTICSEARCH_URL`: Elasticsearch URL (optional, defaults to `http://localhost:9200`)
+- `SPANS_INDEX`: Elasticsearch index for spans (optional, defaults to `aiqa_spans`)
+- `SPANS_INDEX_ALIAS`: Elasticsearch alias for spans (optional, defaults to `aiqa_spans_alias`)
+- `DATASET_EXAMPLES_INDEX`: Elasticsearch index for examples (optional, defaults to `aiqa_dataset_examples`)
+- `DATASET_EXAMPLES_INDEX_ALIAS`: Elasticsearch alias for examples (optional, defaults to `aiqa_dataset_examples_alias`)
+- `AUTH0_DOMAIN`: Your Auth0 domain (required)
+- `AUTH0_AUDIENCE`: Your Auth0 audience (required)
+- `AZURE_OPENAI_ENDPOINT`: Azure OpenAI endpoint (optional, for Azure OpenAI scoring)
+
+*Webapp build variables:*
 - `VITE_AIQA_SERVER_URL`: Server API URL (e.g., `http://your-server:4001` or `https://api.yourdomain.com`)
 - `VITE_AUTH0_DOMAIN`: Your Auth0 domain
 - `VITE_AUTH0_AUDIENCE`: Your Auth0 audience
 
 **Add as Secrets** (Settings → Secrets and variables → Actions → Secrets tab):
+
+*Deployment secrets:*
 - `DEPLOY_SSH_KEY`: Private SSH key for authentication
+
+*Server environment secrets:*
+- `DATABASE_URL`: PostgreSQL connection string (optional, alternative to individual PG vars)
+- `PGHOST`: PostgreSQL host
+- `PGDATABASE`: PostgreSQL database name
+- `PGUSER`: PostgreSQL username
+- `PGPASSWORD`: PostgreSQL password
+
+*Webapp build secrets:*
 - `VITE_AUTH0_CLIENT_ID`: Your Auth0 client ID (sensitive)
 
 To generate an SSH key pair if you don't have one:
@@ -149,7 +181,8 @@ If you prefer to deploy manually instead of using CI/CD:
 cd server
 pnpm install --prod
 pnpm run build
-# Copy dist/, package.json, pnpm-lock.yaml, .env to /opt/aiqa/server
+# Copy dist/, package.json, pnpm-lock.yaml to /opt/aiqa/server
+# Create .env file (see step 4 above) if not using CI/CD
 sudo systemctl restart aiqa-server
 ```
 
@@ -203,9 +236,11 @@ sudo systemctl status nginx
 ### Service won't start
 
 1. Check logs: `sudo journalctl -u aiqa-server -n 50`
-2. Verify environment variables in `/opt/aiqa/server/.env`
-3. Check file permissions: `ls -la /opt/aiqa/server`
+2. Verify environment variables in `/opt/aiqa/server/.env` (if using CI/CD, check GitHub secrets/variables are set correctly)
+3. Check file permissions: `ls -la /opt/aiqa/server` (should be owned by www-data:www-data)
 4. Verify Node.js is installed: `node --version`
+5. Check if `.env` file exists: `ls -la /opt/aiqa/server/.env` (CI/CD creates this automatically)
+6. Verify systemd service file has optional EnvironmentFile: `grep EnvironmentFile /etc/systemd/system/aiqa-server.service` (should show `EnvironmentFile=-/opt/aiqa/server/.env` with the `-` prefix)
 
 ### Port conflicts
 
@@ -263,12 +298,26 @@ ls -la /opt/aiqa/webapp/dist/
 The GitHub Actions workflows automatically:
 1. Build the application when code is pushed to the `server/` or `webapp/` directories
 2. Deploy via SCP to `/opt/aiqa/server` or `/opt/aiqa/webapp`
-3. Install dependencies and restart the service
+3. **For server deployments:** Create `.env` file from GitHub secrets and variables
+4. Install dependencies and restart the service
 
 Workflows trigger on:
 - Push to `server/**` → server deployment
 - Push to `webapp/**` → webapp deployment
 - Manual trigger via GitHub Actions UI
+
+### Server Environment Variables
+
+The server deployment workflow automatically creates `/opt/aiqa/server/.env` from your GitHub secrets and variables. The `.env` file is:
+- Created with proper permissions (600, owned by www-data)
+- Generated on every deployment
+- Never committed to the repository
+
+**Required secrets/variables for server:**
+- Database: Either `DATABASE_URL` (secret) OR `PGHOST`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` (secrets)
+- Auth: `AUTH0_DOMAIN`, `AUTH0_AUDIENCE` (variables)
+
+**Optional variables:** All other server environment variables have sensible defaults and are optional.
 
 ### Webapp Environment Variables
 

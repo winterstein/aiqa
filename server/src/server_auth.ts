@@ -22,13 +22,6 @@ export interface AuthenticatedRequest extends FastifyRequest {
 }
 
 /**
- * Get JWT secret from environment variable (for symmetric JWT tokens).
- */
-function getJwtSecret(): string | null {
-	return process.env.JWT_SECRET || null;
-}
-
-/**
  * Get Auth0 domain from environment variable.
  */
 function getAuth0Domain(): string | null {
@@ -66,7 +59,7 @@ interface JwtVerificationResult {
 
 /**
  * Verify JWT token and extract user information.
- * Supports both Auth0 tokens (RS256 via JWKS) and symmetric tokens (HS256 via JWT_SECRET).
+ * Supports Auth0 tokens (RS256 via JWKS)
  */
 async function verifyJwtToken(token: string): Promise<JwtVerificationResult | null> {
 	try {

@@ -7,7 +7,7 @@ Type=simple
 User=www-data
 WorkingDirectory=/opt/aiqa/server
 Environment="NODE_ENV=production"
-EnvironmentFile=/opt/aiqa/server/.env
+EnvironmentFile=-/opt/aiqa/server/.env
 ExecStart=/usr/bin/env node dist/index.js
 Restart=always
 RestartSec=10
