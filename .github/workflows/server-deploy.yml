@@ -46,6 +46,7 @@ jobs:
           source: "server/dist,server/package.json,server/pnpm-lock.yaml"
           target: "/opt/aiqa/server"
           strip_components: 1
+          rm: true
 
       - name: Create .env file on remote server
         uses: appleboy/ssh-action@v1.0.3
