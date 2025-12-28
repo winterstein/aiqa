@@ -64,19 +64,7 @@ jobs:
             exit 1
           fi
 
-      # - name: Nuke remote server directory
-      #   uses: appleboy/ssh-action@v1.0.3
-      #   with:
-      #     host: ${{ vars.DEPLOY_HOST }}
-      #     username: ${{ vars.DEPLOY_USER }}
-      #     key: ${{ secrets.DEPLOY_SSH_KEY }}
-      #     port: ${{ vars.DEPLOY_PORT || 22 }}
-      #     script: |
-      #       sudo mkdir -p /opt/aiqa/website/webroot
-      #       sudo chown -R $USER:$USER /opt/aiqa/website
-      #       rm -rf /opt/aiqa/website/webroot/*
-
-      - name: Deploy to server
+      - name: Deploy to staging location
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ vars.DEPLOY_HOST }}
@@ -84,8 +72,47 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ vars.DEPLOY_PORT || 22 }}
           source: "website/webroot"
-          target: "/opt/aiqa/website"
+          target: "/opt/aiqa/website-staging"
           strip_components: 1
+
+      - name: Verify and swap deployment
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ vars.DEPLOY_HOST }}
+          username: ${{ vars.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ vars.DEPLOY_PORT || 22 }}
+          script: |
+            # Verify staging deployment has index.html
+            if [ ! -f "/opt/aiqa/website-staging/webroot/index.html" ]; then
+              echo "Error: index.html not found in staging deployment"
+              exit 1
+            fi
+            
+            # Create backup of current deployment (if it exists)
+            if [ -d "/opt/aiqa/website/webroot" ]; then
+              sudo mv /opt/aiqa/website/webroot /opt/aiqa/website/webroot.backup.$(date +%s)
+            fi
+            
+            # Atomically swap staging to production
+            sudo mkdir -p /opt/aiqa/website
+            sudo mv /opt/aiqa/website-staging/webroot /opt/aiqa/website/webroot
+            sudo chown -R www-data:www-data /opt/aiqa/website
+            
+            # Verify production deployment
+            if [ ! -f "/opt/aiqa/website/webroot/index.html" ]; then
+              echo "Error: index.html not found after swap, restoring backup"
+              if [ -d "/opt/aiqa/website/webroot.backup."* ]; then
+                sudo mv /opt/aiqa/website/webroot.backup.* /opt/aiqa/website/webroot
+              fi
+              exit 1
+            fi
+            
+            # Clean up old backups (keep last 3)
+            ls -td /opt/aiqa/website/webroot.backup.* 2>/dev/null | tail -n +4 | xargs -r sudo rm -rf
+            
+            echo "Deployment successful"
+            ls -la /opt/aiqa/website/webroot/ | head -20
 
       - name: Restart nginx
         uses: appleboy/ssh-action@v1.0.3
@@ -95,8 +122,5 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ vars.DEPLOY_PORT || 22 }}
           script: |
-            sudo mkdir -p /opt/aiqa/website/webroot
-            sudo chown -R www-data:www-data /opt/aiqa/website
-            ls -la /opt/aiqa/website/webroot/ | head -20
             sudo systemctl reload nginx
             sudo systemctl status nginx
