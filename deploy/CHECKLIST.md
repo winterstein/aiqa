@@ -31,9 +31,10 @@ Use this checklist to verify your deployment setup is complete.
 - [ ] Run `./deploy/setup.sh` on the server (or follow manual steps)
 - [ ] Created `/opt/aiqa/server/.env` with database credentials
 - [ ] Server service file installed: `/etc/systemd/system/aiqa-server.service`
-- [ ] Nginx config installed: `/etc/nginx/sites-available/webapp` (from `deploy/aiqa-webapp.nginx.conf`)
+- [ ] Nginx config installed: `/etc/nginx/sites-available/webapp` (from `deploy/app.aiqa.nginx.conf`)
 - [ ] Nginx config symlinked: `/etc/nginx/sites-enabled/webapp`
-- [ ] Website nginx config installed (optional): `/etc/nginx/sites-available/website` (from `deploy/aiqa-website.nginx.conf`)
+- [ ] Website nginx config installed (optional): `/etc/nginx/sites-available/website` (from `deploy/website-aiqa.nginx.conf`)
+- [ ] Nginx log directories created: `/var/log/nginx/app.aiqa.winterwell.com` and `/var/log/nginx/aiqa.winterwell.com`
 - [ ] Website nginx config symlinked (optional): `/etc/nginx/sites-enabled/website`
 - [ ] Default nginx site disabled (if exists)
 - [ ] Nginx config tested: `sudo nginx -t`
@@ -51,7 +52,7 @@ Use this checklist to verify your deployment setup is complete.
 - [ ] Push a change to `webapp/` directory to trigger webapp deployment
 - [ ] Verify webapp deployment workflow completes successfully
 - [ ] Check nginx is running: `sudo systemctl status nginx`
-- [ ] Test webapp: `curl http://localhost:4000`
+- [ ] Test webapp: `curl http://localhost` or `curl https://app.aiqa.winterwell.com`
 - [ ] Verify webapp can connect to server API
 
 ## Post-Deployment Verification
@@ -79,7 +80,7 @@ If something doesn't work:
    - Check nginx logs: `sudo tail -f /var/log/nginx/error.log`
    - Verify files exist: `ls -la /opt/aiqa/webapp/dist`
    - Test nginx config: `sudo nginx -t`
-   - Check port 4000 is not in use: `sudo netstat -tulpn | grep :4000`
+   - Check nginx is listening on ports 80/443: `sudo netstat -tulpn | grep nginx`
 
 3. **Deployment fails:**
    - Check GitHub Actions logs for errors

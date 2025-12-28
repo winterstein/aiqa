@@ -1,7 +1,7 @@
 # Note: This service file is optional. The recommended approach is to use nginx's standard service.
 # 
 # RECOMMENDED: Use standard nginx service with site config:
-# sudo cp deploy/aiqa-webapp.nginx.conf /etc/nginx/sites-available/webapp
+# sudo cp deploy/app.aiqa.nginx.conf /etc/nginx/sites-available/webapp
 # sudo ln -s /etc/nginx/sites-available/webapp /etc/nginx/sites-enabled/
 # sudo nginx -t
 # sudo systemctl reload nginx

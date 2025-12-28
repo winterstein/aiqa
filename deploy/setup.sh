@@ -1,8 +1,16 @@
 #!/bin/bash
 # Quick setup script for initial server deployment
 # Run this on your Ubuntu server after cloning the repo
+# Must be run from the repository root directory
 
 set -e
+
+# Check if we're in the right directory
+if [ ! -d "deploy" ] || [ ! -f "deploy/setup.sh" ]; then
+    echo "Error: This script must be run from the repository root directory"
+    echo "Current directory: $(pwd)"
+    exit 1
+fi
 
 echo "Setting up AIQA deployment directories..."
 
@@ -29,16 +37,21 @@ echo "Installing systemd service files..."
 sudo cp deploy/aiqa-server.service /etc/systemd/system/
 
 # Install nginx config for webapp
-sudo cp deploy/aiqa-webapp.nginx.conf /etc/nginx/sites-available/webapp
+sudo cp deploy/app.aiqa.nginx.conf /etc/nginx/sites-available/webapp
 if [ ! -L /etc/nginx/sites-enabled/webapp ]; then
     sudo ln -s /etc/nginx/sites-available/webapp /etc/nginx/sites-enabled/
 fi
 
 # Install nginx config for website (optional)
-# sudo cp deploy/aiqa-website.nginx.conf /etc/nginx/sites-available/website
+# sudo cp deploy/website-aiqa.nginx.conf /etc/nginx/sites-available/website
 # if [ ! -L /etc/nginx/sites-enabled/website ]; then
 #     sudo ln -s /etc/nginx/sites-available/website /etc/nginx/sites-enabled/
 # fi
+
+# Create nginx log directories (required before nginx can start)
+sudo mkdir -p /var/log/nginx/app.aiqa.winterwell.com
+sudo mkdir -p /var/log/nginx/aiqa.winterwell.com
+sudo chown -R www-data:www-data /var/log/nginx/
 
 # Disable default nginx site if it exists
 if [ -L /etc/nginx/sites-enabled/default ]; then

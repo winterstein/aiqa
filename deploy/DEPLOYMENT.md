@@ -28,9 +28,20 @@ sudo chown -R $USER:$USER /opt/aiqa
 sudo cp deploy/aiqa-server.service /etc/systemd/system/
 
 # For webapp, use standard nginx service (recommended)
-sudo cp deploy/aiqa-webapp.nginx.conf /etc/nginx/sites-available/webapp
+sudo cp deploy/app.aiqa.nginx.conf /etc/nginx/sites-available/webapp
 sudo ln -s /etc/nginx/sites-available/webapp /etc/nginx/sites-enabled/
-sudo nginx -t  # Test configuration
+
+# For website (optional)
+# sudo cp deploy/website-aiqa.nginx.conf /etc/nginx/sites-available/website
+# sudo ln -s /etc/nginx/sites-available/website /etc/nginx/sites-enabled/
+
+# Create nginx log directories (REQUIRED - nginx will fail to start without these)
+sudo mkdir -p /var/log/nginx/app.aiqa.winterwell.com
+sudo mkdir -p /var/log/nginx/aiqa.winterwell.com
+sudo chown -R www-data:www-data /var/log/nginx/
+
+# Test nginx configuration
+sudo nginx -t
 
 # Reload systemd
 sudo systemctl daemon-reload
@@ -157,14 +168,38 @@ sudo systemctl status nginx
 ### Port conflicts
 
 - Server defaults to port 4001 (set via `PORT` in `.env`)
-- Webapp defaults to port 4000 (configured in `aiqa-webapp.nginx.conf`)
-- Check if ports are in use: `sudo netstat -tulpn | grep :4000`
+- Webapp is served by nginx on ports 80 (HTTP) and 443 (HTTPS) - see `app.aiqa.nginx.conf`
+- Check if ports are in use: `sudo netstat -tulpn | grep :4001` (server) or `sudo netstat -tulpn | grep :80` (nginx)
 
 ### Permission issues
 
 ```bash
 sudo chown -R www-data:www-data /opt/aiqa
 ```
+
+### Nginx log directory errors
+
+If nginx fails to start with errors like:
+```
+nginx: [emerg] open() "/var/log/nginx/aiqa.winterwell.com/access.log" failed (2: No such file or directory)
+```
+
+Create the required log directories:
+
+```bash
+# Create log directories for all nginx sites
+sudo mkdir -p /var/log/nginx/app.aiqa.winterwell.com
+sudo mkdir -p /var/log/nginx/aiqa.winterwell.com
+sudo chown -R www-data:www-data /var/log/nginx/
+
+# Test nginx configuration
+sudo nginx -t
+
+# If test passes, restart nginx
+sudo systemctl restart nginx
+```
+
+**Note:** Check your nginx configuration files for any other custom log paths and create those directories as well.
 
 ### Verify deployment files
 
@@ -209,8 +244,10 @@ These are baked into the build at compile time, so you need to rebuild and redep
 ### Network Configuration
 
 By default:
-- Server runs on port 4001
-- Webapp runs on port 4000
+- Server runs on port 4001 (configurable via `PORT` in `.env`)
+- Webapp is served by nginx on ports 80 (HTTP) and 443 (HTTPS)
+
+**Note:** Port 4000 is only used in development mode (`pnpm dev`). In production, nginx serves the webapp on standard HTTP/HTTPS ports.
 
 If the webapp and server are on the same server, the webapp can connect directly using `VITE_AIQA_SERVER_URL=http://localhost:4001`. 
 

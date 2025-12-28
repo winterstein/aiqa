@@ -6,8 +6,8 @@ This directory contains all files needed for 24x7 deployment of the AIQA server 
 
 ### Service Files
 - **aiqa-server.service** - Systemd service file for the server (auto-restart on failure)
-- **aiqa-webapp.nginx.conf** - Nginx site configuration for serving the webapp (recommended)
-- **aiqa-website.nginx.conf** - Nginx site configuration for serving the website
+- **app.aiqa.nginx.conf** - Nginx site configuration for serving the webapp (recommended)
+- **website-aiqa.nginx.conf** - Nginx site configuration for serving the website
 - **aiqa-webapp.optional.service** - Alternative systemd service (optional, uses custom nginx config)
 
 ### CI/CD Workflows
@@ -44,7 +44,7 @@ This directory contains all files needed for 24x7 deployment of the AIQA server 
 ## Architecture
 
 - **Server**: Runs as systemd service on port 4001, auto-restarts on failure
-- **Webapp**: Served by nginx on port 4000, static files from `/opt/aiqa/webapp/dist`
+- **Webapp**: Served by nginx on ports 80/443 (HTTP/HTTPS), static files from `/opt/aiqa/webapp/dist`
 - **CI/CD**: GitHub Actions builds and deploys automatically on code changes
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed instructions.
