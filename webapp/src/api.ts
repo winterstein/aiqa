@@ -153,8 +153,9 @@ export async function searchSpans(args: {
 	query?: string;
 	limit?: number;
 	offset?: number;
+	fields?: string; // Comma-separated list of fields, or '*' for all fields including attributes
 }) {
-	let { organisationId, isRoot = false, query, limit = 100, offset = 0 } = args;
+	let { organisationId, isRoot = false, query, limit = 100, offset = 0, fields } = args;
 	// In a real implementation, you'd need to get an API key for this organisation
 	// For now, we'll construct the URL but note that authentication is needed
 	const params = new URLSearchParams();
@@ -166,6 +167,7 @@ export async function searchSpans(args: {
 	if (query) params.append('q', query);
 	params.append('limit', limit.toString());
 	params.append('offset', offset.toString());
+	if (fields) params.append('fields', fields);
 
 	// Note: This endpoint requires API key authentication
 	// You'll need to implement proper auth handling

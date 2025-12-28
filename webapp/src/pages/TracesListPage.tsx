@@ -36,7 +36,8 @@ const TracesListPage: React.FC = () => {
 
   const loadData = async (query: string): Promise<PageableData<Span>> => {
     const limit = 1000; // Fetch more traces for in-memory filtering
-    const result = await searchSpans({ organisationId: organisationId!, query, isRoot: true, limit, offset: 0 });
+    // Request all fields including attributes since we need them for tokens, cost, feedback, and component
+    const result = await searchSpans({ organisationId: organisationId!, query, isRoot: true, limit, offset: 0, fields: '*' });
     
     console.log('[TracesListPage] API Response:', {
       total: result.total,
@@ -65,7 +66,8 @@ const TracesListPage: React.FC = () => {
           organisationId: organisationId!,
           query: `(${feedbackQuery}) AND attributes.aiqa\\.span_type:feedback`,
           limit: 1000,
-          offset: 0
+          offset: 0,
+          fields: '*' // Need attributes for feedback information
         });
         
         // Create feedback map

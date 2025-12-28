@@ -9,20 +9,70 @@ import React, { useState } from 'react';
 import CopyButton from './CopyButton';
 import ExpandCollapseControl from './ExpandCollapseControl';
 
-export default function JsonObjectViewer({ json, textComponent, depth = 2 }: { json: any, textComponent?: React.ComponentType<{ text: string, depth?: number }>, depth?: number }) {
-	const $copyButton = <CopyButton content={json} />
+function MessageViewer({ json, textComponent, depth = 2 }: { json: any, textComponent?: React.ComponentType<{ text: string, depth?: number }>, depth?: number }) {
+	const otherKVs = { ...json };
+	delete otherKVs.role;
+	delete otherKVs.content;
+	const TextComponent = textComponent;
+	const [expanded, setExpanded] = useState(false);
+	const $copyButton = <CopyButton content={json} logToConsole />
+	let content = json.content;
+	// unwrap common chat message formats
+	if (Array.isArray(content) && content.length === 1) {
+		content = content[0];
+	}
+	if (typeof content === "object" && content.type === "text") {
+		content = content.text;
+	}
+	//
+	return <div className="my-2" style={{ marginLeft: '20px', borderLeft: '2px solid #ccc', paddingLeft: '10px', maxWidth: '100%', minWidth: 0, overflowX: 'auto' }}>
+		<div className="d-flex align-items-center mb-1">			
+			<b className="ms-2 me-2">Role:</b> <span>{json.role}</span>
+			<span className="ms-2">{$copyButton}</span>
+		</div>
+		<div className="my-1">
+			<b>Content:</b>
+			<ExpandCollapseControl
+				hasChildren={true}
+				isExpanded={expanded}
+				onToggle={() => setExpanded(!expanded)}
+			/>
+			{expanded
+				? (typeof content === "string" ? <TextComponent text={content} depth={depth - 1} /> : <JsonObjectViewer json={content} textComponent={textComponent} depth={depth - 1} />)
+				: (typeof content === "string" ? content.substring(0, 100) : JSON.stringify(content).substring(0, 100))
+			}			
+		</div>
+		{Object.keys(otherKVs).length > 0 && (
+			<div className="my-2 ps-2" style={{ borderLeft: '2px solid #e0e0e0', maxWidth: '100%', minWidth: 0 }}>
+				Other: <JsonObjectViewer json={otherKVs} textComponent={textComponent} depth={depth - 1} />
+			</div>
+		)}
+	</div>;
+}
+
+
+export default function JsonObjectViewer({ json, textComponent, depth = 2 }: { json: any, textComponent?: React.ComponentType<{ text: string, depth?: number }>, depth?: number }) {	
 	const [localDepth, setLocalDepth] = useState<number | null>(null);
 	const effectiveDepth = localDepth !== null ? localDepth : depth;
 	const expanded = effectiveDepth > 0;
 	const [arrayFullyExpanded, setArrayFullyExpanded] = useState(false);
-	
+	if (json===null || json===undefined) {
+		return null;
+	}
+	const $copyButton = <CopyButton content={json} logToConsole />
+
+	// HACK is this a chat message?
+	if (json.role && json.content) {
+		return <MessageViewer json={json} textComponent={textComponent} depth={depth} />
+	}
+
 	if (Array.isArray(json)) {
 		const itemsToShow = arrayFullyExpanded ? json.length : Math.min(3, json.length);
 		const hasMore = json.length > 3;
-		
+
 		if (!expanded) {
 			return (
-				<div className="border rounded p-2 my-2" style={{ borderColor: '#e0e0e0', maxWidth: '100%', minWidth: 0, overflowX: 'auto' }}>
+				<div className="my-2" style={{ marginLeft: '20px', borderLeft: '2px solid #ccc', paddingLeft: '10px', maxWidth: '100%', minWidth: 0, overflowX: 'auto' }}>
 					<div className="d-flex align-items-center mb-1">
 						<ExpandCollapseControl hasChildren={true} isExpanded={false} onToggle={() => setLocalDepth(1)} />
 						<span className="text-muted fst-italic me-2">Array ({json.length} items)</span>
@@ -31,9 +81,9 @@ export default function JsonObjectViewer({ json, textComponent, depth = 2 }: { j
 				</div>
 			);
 		}
-		
+
 		return (
-			<div className="border rounded p-2 my-2" style={{ borderColor: '#e0e0e0', maxWidth: '100%', minWidth: 0, overflowX: 'auto' }}>
+			<div className="my-2" style={{ marginLeft: '20px', borderLeft: '2px solid #ccc', paddingLeft: '10px', maxWidth: '100%', minWidth: 0, overflowX: 'auto' }}>
 				<div className="d-flex align-items-center mb-1">
 					<ExpandCollapseControl hasChildren={true} isExpanded={true} onToggle={() => setLocalDepth(0)} />
 					<span className="text-muted fst-italic me-2">Array ({json.length} items)</span>
@@ -45,8 +95,8 @@ export default function JsonObjectViewer({ json, textComponent, depth = 2 }: { j
 					</div>
 				))}
 				{hasMore && !arrayFullyExpanded && (
-					<button 
-						className="btn btn-sm btn-link mt-2 p-0" 
+					<button
+						className="btn btn-sm btn-link mt-2 p-0"
 						onClick={() => setArrayFullyExpanded(true)}
 						style={{ fontSize: '12px' }}
 					>
@@ -54,8 +104,8 @@ export default function JsonObjectViewer({ json, textComponent, depth = 2 }: { j
 					</button>
 				)}
 				{hasMore && arrayFullyExpanded && (
-					<button 
-						className="btn btn-sm btn-link mt-2 p-0" 
+					<button
+						className="btn btn-sm btn-link mt-2 p-0"
 						onClick={() => setArrayFullyExpanded(false)}
 						style={{ fontSize: '12px' }}
 					>
@@ -65,13 +115,13 @@ export default function JsonObjectViewer({ json, textComponent, depth = 2 }: { j
 			</div>
 		);
 	}
-	if (typeof(json) === 'object' && json !== null) {
+	if (typeof (json) === 'object' && json !== null) {
 		const hasKeys = Object.keys(json).length > 0;
 		const keyCount = Object.keys(json).length;
-		
+
 		if (!expanded) {
 			return (
-				<div className="border rounded p-2 my-2" style={{ borderColor: '#e0e0e0', maxWidth: '100%', minWidth: 0, overflowX: 'auto' }}>
+				<div className="my-2" style={{ marginLeft: '20px', borderLeft: '2px solid #ccc', paddingLeft: '10px', maxWidth: '100%', minWidth: 0, overflowX: 'auto' }}>
 					<div className="d-flex align-items-center mb-1">
 						<ExpandCollapseControl hasChildren={true} isExpanded={false} onToggle={() => setLocalDepth(1)} />
 						<span className="text-muted fst-italic me-2">Object ({keyCount} keys)</span>
@@ -80,9 +130,9 @@ export default function JsonObjectViewer({ json, textComponent, depth = 2 }: { j
 				</div>
 			);
 		}
-		
+
 		return (
-			<div className="border rounded p-2 my-2" style={{ borderColor: '#e0e0e0', maxWidth: '100%', minWidth: 0, overflowX: 'auto' }}>
+			<div className="my-2" style={{ marginLeft: '20px', borderLeft: '2px solid #ccc', paddingLeft: '10px', maxWidth: '100%', minWidth: 0, overflowX: 'auto' }}>
 				<div className="d-flex align-items-center mb-1">
 					<ExpandCollapseControl hasChildren={true} isExpanded={true} onToggle={() => setLocalDepth(0)} />
 					<span className="text-muted fst-italic me-2">Object ({keyCount} keys)</span>
@@ -90,23 +140,23 @@ export default function JsonObjectViewer({ json, textComponent, depth = 2 }: { j
 				</div>
 				{Object.entries(json).map(([key, value]) => {
 					// Check if value is a short primitive that can be shown inline
-					const isShortPrimitive = 
+					const isShortPrimitive =
 						(typeof value === 'string' && value.length < 100) ||
 						typeof value === 'number' ||
 						typeof value === 'boolean' ||
 						value === null ||
 						value === undefined;
-					
+
 					if (isShortPrimitive) {
 						// Show key: value on the same line
 						return (
 							<div key={key} className="my-1" style={{ wordBreak: 'break-all', overflowWrap: 'anywhere', maxWidth: '100%', minWidth: 0 }}>
 								<span className="fw-bold me-2" style={{ color: '#555' }}>{key}:</span>
-								<span>{value}</span>
+								<span>{String(value)}</span>
 							</div>
 						);
 					}
-					
+
 					// For complex values, show on separate line
 					return (
 						<div key={key} className="my-2" style={{ maxWidth: '100%', minWidth: 0 }}>
@@ -126,5 +176,5 @@ export default function JsonObjectViewer({ json, textComponent, depth = 2 }: { j
 		const TextComponent = textComponent;
 		return <TextComponent text={json} depth={effectiveDepth - 1} />;
 	}
-	return <span className="text-muted">{""+json}</span>;
+	return <span className="text-muted">{"" + json}</span>;
 }

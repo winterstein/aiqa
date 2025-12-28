@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Row, Col } from 'reactstrap';
+import { Row, Col, Input } from 'reactstrap';
 import { useQuery } from '@tanstack/react-query';
 import { createExampleFromSpans, listDatasets, searchSpans } from '../api';
 import { Span } from '../common/types';
@@ -10,6 +10,7 @@ import CopyButton from '../components/generic/CopyButton';
 import ExpandCollapseControl from '../components/generic/ExpandCollapseControl';
 import { useToast } from '../utils/toast';
 import { durationString } from '../utils/span-utils';
+import JsonObjectViewer from '../components/generic/JsonObjectViewer';
 
 interface SpanTree {
 	span: Span;
@@ -92,16 +93,22 @@ const TraceDetailsPage: React.FC = () => {
   const { organisationId, traceId } = useParams<{ organisationId: string; traceId: string }>();
 
   // Load all spans
-  const { data: traceSpans } = useQuery({
+  const { data: traceSpans, isLoading: isLoadingSpans } = useQuery({
     queryKey: ['spans', organisationId, traceId],
     queryFn: async () => {
-      const result = await searchSpans({ organisationId: organisationId!, query: `traceId:${traceId}`, limit: 1000, offset: 0 });
+      const result = await searchSpans({ organisationId: organisationId!, query: `traceId:${traceId}`, limit: 1000, offset: 0, fields: '*' }); // Need attributes for input/output display
 	  return result.hits;
     },
     enabled: !!organisationId && !!traceId,
   });
   // organise the traceSpans into a tree of spans, with the root span at the top
-  const spanTree = traceSpans ? organiseSpansIntoTree(traceSpans, null) : null;
+  // MEMOIZE THIS - it's O(n²) and runs on every render without memoization!
+  const spanTree = useMemo(() => {
+    return traceSpans ? organiseSpansIntoTree(traceSpans, null) : null;
+  }, [traceSpans]);
+  
+  // Track if we're processing spans (data loaded but tree not ready)
+  const isProcessingSpans = traceSpans !== undefined && spanTree === null;
   
   // Calculate duration unit from root span (longest duration) for consistent display across all spans
   const durationUnit = useMemo(() => {
@@ -122,22 +129,78 @@ const TraceDetailsPage: React.FC = () => {
   // State for selected span and expanded spans
   const [selectedSpanId, setSelectedSpanId] = useState<string | null>(null);
   const [expandedSpanIds, setExpandedSpanIds] = useState<Set<string>>(new Set());
+  
+  // State for filter input and debounced filter value
+  const [filterInput, setFilterInput] = useState('');
+  const [debouncedFilter, setDebouncedFilter] = useState('');
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Debounce filter input (500ms delay)
+  useEffect(() => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    debounceTimerRef.current = setTimeout(() => {
+      setDebouncedFilter(filterInput);
+    }, 500);
+    
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, [filterInput]);
 
   // Initialize selected span to the root span when tree is loaded
   useEffect(() => {
     if (spanTree && !selectedSpanId) {
       const rootSpanId = getSpanId(spanTree.span);
       setSelectedSpanId(rootSpanId);
-      // Expand all spans initially
-      const allSpanIds = new Set<string>();
-      const collectAllSpanIds = (tree: SpanTree) => {
-        allSpanIds.add(getSpanId(tree.span));
-        tree.children.forEach(child => collectAllSpanIds(child));
-      };
-      collectAllSpanIds(spanTree);
-      setExpandedSpanIds(allSpanIds);
+      // Only expand the root span initially (not all spans) for better performance
+      setExpandedSpanIds(new Set([rootSpanId]));
     }
   }, [spanTree, selectedSpanId]);
+  
+  // Auto-expand nodes that contain matching spans when filter is applied
+  useEffect(() => {
+    if (!debouncedFilter || !spanTree) {
+      return;
+    }
+    
+    const filterLower = debouncedFilter.toLowerCase();
+    const spansToExpand = new Set<string>();
+    
+    // Recursively find all spans that match or have matching descendants
+    function findMatchingSpans(tree: SpanTree): boolean {
+      const spanName = (tree.span as any).name || '';
+      const matches = spanName.toLowerCase().includes(filterLower);
+      
+      let hasMatchingDescendant = false;
+      for (const child of tree.children) {
+        if (findMatchingSpans(child)) {
+          hasMatchingDescendant = true;
+        }
+      }
+      
+      // If this span matches or has a matching descendant, expand its path
+      if (matches || hasMatchingDescendant) {
+        spansToExpand.add(getSpanId(tree.span));
+        // Also expand all ancestors by adding parent spans
+        // We'll expand all nodes in the path to matching spans
+      }
+      
+      return matches || hasMatchingDescendant;
+    }
+    
+    findMatchingSpans(spanTree);
+    
+    // Update expanded spans to include all paths to matching spans
+    setExpandedSpanIds(prev => {
+      const next = new Set(prev);
+      spansToExpand.forEach(id => next.add(id));
+      return next;
+    });
+  }, [debouncedFilter, spanTree]);
 
   /** spans must be from the same trace */
   const addToDataSet = async (spanTree: SpanTree) => {
@@ -208,6 +271,65 @@ const TraceDetailsPage: React.FC = () => {
     return null;
   }, [spanTree, selectedSpanId, traceSpans]);
 
+  // Show loading spinner while fetching spans
+  if (isLoadingSpans) {
+    return (
+      <div className="mt-4" style={{ maxWidth: '100%', minWidth: 0, width: '100%', boxSizing: 'border-box' }}>
+        <Row>
+          <Col>
+            <Link to={`/organisation/${organisationId}/traces`} className="btn btn-link mb-3">
+              ← Back to Traces
+            </Link>
+            <h1>Trace: <code>{traceId}</code></h1>
+          </Col>
+        </Row>
+        <Row>
+          <Col>
+            <div className="text-center" style={{ padding: '40px' }}>
+              <div className="spinner-border" role="status">
+                <span className="visually-hidden">Loading...</span>
+              </div>
+              <div style={{ marginTop: '15px' }}>
+                <strong>Loading spans data...</strong>
+              </div>
+            </div>
+          </Col>
+        </Row>
+      </div>
+    );
+  }
+
+  // Show processing spinner while organizing spans into tree
+  if (isProcessingSpans) {
+    return (
+      <div className="mt-4" style={{ maxWidth: '100%', minWidth: 0, width: '100%', boxSizing: 'border-box' }}>
+        <Row>
+          <Col>
+            <Link to={`/organisation/${organisationId}/traces`} className="btn btn-link mb-3">
+              ← Back to Traces
+            </Link>
+            <h1>Trace: <code>{traceId}</code></h1>
+          </Col>
+        </Row>
+        <Row>
+          <Col>
+            <div className="text-center" style={{ padding: '40px' }}>
+              <div className="spinner-border" role="status">
+                <span className="visually-hidden">Processing...</span>
+              </div>
+              <div style={{ marginTop: '15px' }}>
+                <strong>Processing spans data...</strong>
+                <div className="text-muted" style={{ marginTop: '5px' }}>
+                  Organizing {traceSpans?.length || 0} spans into tree structure
+                </div>
+              </div>
+            </div>
+          </Col>
+        </Row>
+      </div>
+    );
+  }
+
   return (
     <div className="mt-4" style={{ maxWidth: '100%', minWidth: 0, width: '100%', boxSizing: 'border-box' }}>
       <Row>
@@ -219,8 +341,22 @@ const TraceDetailsPage: React.FC = () => {
         </Col>
       </Row>
       <Row>
-        <Col md={4} style={{ minWidth: 0 }}>
+        <Col md={4} style={{ minWidth: 0, maxHeight: '100vh', overflowY: 'auto' }}>
           <h3>Span Tree</h3>
+          <div style={{ marginBottom: '10px' }}>
+            <Input
+              type="text"
+              placeholder="Filter by span name..."
+              value={filterInput}
+              onChange={(e) => setFilterInput(e.target.value)}
+              style={{ marginBottom: '5px' }}
+            />
+            {filterInput && (
+              <small className="text-muted">
+                {debouncedFilter ? 'Filtering...' : 'Type to filter (debounced)'}
+              </small>
+            )}
+          </div>
           {spanTree && (
             <SpanTreeViewer 
               spanTree={spanTree} 
@@ -229,10 +365,11 @@ const TraceDetailsPage: React.FC = () => {
               onSelectSpan={handleSelectSpan}
               onToggleExpanded={toggleExpanded}
               durationUnit={durationUnit}
+              filter={debouncedFilter}
             />
           )}
         </Col>
-        <Col md={8} style={{ minWidth: 0 }}>
+        <Col md={8} style={{ minWidth: 0, maxHeight: '100vh', overflowY: 'auto' }}>
           <h3>Span Details: {selectedSpan?.name || selectedSpanId}</h3>
           {selectedSpan ? (
             <SpanDetails span={selectedSpan} />
@@ -251,36 +388,57 @@ const TraceDetailsPage: React.FC = () => {
 };
 
 function FullJson({ json }: { json: any }) {
-	if (!json) return null;
-	const jsonString = JSON.stringify(json, null, 2);
+	const [isExpanded, setIsExpanded] = useState(false);
 	const {showToast} = useToast();
+	
+	// Only stringify when expanded to avoid expensive operation on initial render
+	const jsonString = useMemo(() => {
+		return isExpanded ? JSON.stringify(json, null, 2) : '';
+	}, [json, isExpanded]);
+
+	if (!json) return null;
+
 	return (
 		<div style={{ marginTop: '30px', padding: '15px', border: '1px solid #ddd', borderRadius: '4px', backgroundColor: '#f9f9f9', maxWidth: '100%', minWidth: 0, width: '100%', boxSizing: 'border-box' }}>
 		  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', minWidth: 0, maxWidth: '100%' }}>
-			<strong>Full trace JSON</strong>
-			<CopyButton content={json} showToast={showToast} logToConsole  successMessage="Copied json to clipboard and logged to console." />
+			<div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+				<ExpandCollapseControl 
+					hasChildren={true} 
+					isExpanded={isExpanded} 
+					onToggle={() => setIsExpanded(!isExpanded)} 
+				/>
+				<strong>Full trace JSON</strong>
+			</div>
+			<CopyButton content={json} showToast={showToast} logToConsole successMessage="Copied json to clipboard and logged to console." />
 		  </div>
-		  <pre style={{ 
-			fontSize: '11px', 
-			maxHeight: '150px', 
-			maxWidth: '100%',
-			width: '100%',
-			minWidth: 0,
-			overflow: 'auto',
-			overflowX: 'auto',
-			overflowY: 'auto',
-			margin: 0,
-			padding: '10px',
-			backgroundColor: '#fff',
-			border: '1px solid #ddd',
-			borderRadius: '3px',
-			wordBreak: 'break-all',
-			overflowWrap: 'anywhere',
-			whiteSpace: 'pre-wrap',
-			boxSizing: 'border-box'
-		  }}>
-			<code style={{ maxWidth: '100%', wordBreak: 'break-all', overflowWrap: 'anywhere', display: 'block' }}>{jsonString}</code>
-		  </pre>
+		  {isExpanded && (
+			<pre style={{ 
+				fontSize: '11px', 
+				maxHeight: '150px', 
+				maxWidth: '100%',
+				width: '100%',
+				minWidth: 0,
+				overflow: 'auto',
+				overflowX: 'auto',
+				overflowY: 'auto',
+				margin: 0,
+				padding: '10px',
+				backgroundColor: '#fff',
+				border: '1px solid #ddd',
+				borderRadius: '3px',
+				wordBreak: 'break-all',
+				overflowWrap: 'anywhere',
+				whiteSpace: 'pre-wrap',
+				boxSizing: 'border-box'
+			}}>
+				<code style={{ maxWidth: '100%', wordBreak: 'break-all', overflowWrap: 'anywhere', display: 'block' }}>{jsonString.substring(0, 100000)/* traces can get BIG */}</code>
+			</pre>
+		  )}
+		  {!isExpanded && (
+			<div style={{ color: '#666', fontStyle: 'italic', padding: '10px' }}>
+				Click to expand and view full trace JSON ({Array.isArray(json) ? json.length : 'N/A'} spans)
+			</div>
+		  )}
 		</div>
 	  )
 }
@@ -291,7 +449,8 @@ function SpanTreeViewer({
 	expandedSpanIds,
 	onSelectSpan,
 	onToggleExpanded,
-	durationUnit
+	durationUnit,
+	filter
 }: { 
 	spanTree: SpanTree;
 	selectedSpanId: string | null;
@@ -299,18 +458,55 @@ function SpanTreeViewer({
 	onSelectSpan: (spanId: string) => void;
 	onToggleExpanded: (spanId: string) => void;
 	durationUnit: 'ms' | 's' | 'm' | 'h' | 'd' | null | undefined;
+	filter?: string;
 }) {
 	const span = spanTree.span;
 	const children = spanTree.children;
 	const spanId = getSpanId(span);
 	const isExpanded = expandedSpanIds.has(spanId);
 	const isSelected = selectedSpanId === spanId;
+	
+	// Helper function to check if a tree node or any of its descendants match the filter
+	const treeMatchesFilter = useCallback((tree: SpanTree, filterLower: string): boolean => {
+		const name = (tree.span as any).name || '';
+		if (name.toLowerCase().includes(filterLower)) {
+			return true;
+		}
+		return tree.children.some(child => treeMatchesFilter(child, filterLower));
+	}, []);
+	
+	// Check if this span matches the filter
+	const spanName = (span as any).name || '';
+	const matchesFilter = !filter || spanName.toLowerCase().includes(filter.toLowerCase());
+	
+	// Recursively check if any descendant matches
+	const hasMatchingDescendant = useMemo(() => {
+		if (!filter) return true; // Show all when no filter
+		return children.some(child => treeMatchesFilter(child, filter.toLowerCase()));
+	}, [filter, children, treeMatchesFilter]);
+	
+	// Only show this node if it matches or has a matching descendant
+	if (filter && !matchesFilter && !hasMatchingDescendant) {
+		return null;
+	}
+	
+	// Filter children to only show those that match or have matching descendants
+	const filteredChildren = useMemo(() => {
+		if (!filter) return children;
+		const filterLower = filter.toLowerCase();
+		return children.filter(child => treeMatchesFilter(child, filterLower));
+	}, [children, filter, treeMatchesFilter]);
 
 	const handleSelect = (e: React.MouseEvent) => {
 		e.preventDefault();
 		e.stopPropagation();
 		onSelectSpan(spanId);
 	};
+
+	const spanAny = span as any;
+	const spanSummary = spanAny.attributes?.input?.message 
+		? <div>Message: {JSON.stringify(spanAny.attributes.input.message).substring(0,100)}</div>
+		: null;
 
 	return (
 		<div style={{ marginLeft: '20px', marginTop: '5px', borderLeft: '2px solid #ccc', paddingLeft: '10px' }}>
@@ -332,7 +528,8 @@ function SpanTreeViewer({
 					}}
 					onClick={handleSelect}
 				>									
-					{span.name && <div>Name: {(span as any).name}</div>}
+					{(span as any).name && <div>Name: {(span as any).name}</div>}
+					{spanSummary}
 					<div>Span ID: {spanId}</div>
 					<div>Duration: <span>{durationString(getDurationMs(span), durationUnit)}</span></div>
 				<div style={{ position: 'absolute', right: '20px', top: '10px' }}>
@@ -340,9 +537,10 @@ function SpanTreeViewer({
 				</div>
 				</div>
 			</div>
-			{isExpanded && children.length > 0 && (
+			{/* Only render children when expanded - this is the key optimization */}
+			{isExpanded && filteredChildren.length > 0 && (
 				<div>
-					{children.map(kid => (
+					{filteredChildren.map(kid => (
 						<SpanTreeViewer 
 							key={getSpanId(kid.span)} 
 							spanTree={kid}
@@ -351,6 +549,7 @@ function SpanTreeViewer({
 							onSelectSpan={onSelectSpan}
 							onToggleExpanded={onToggleExpanded}
 							durationUnit={durationUnit}
+							filter={filter}
 						/>
 					))}
 				</div>
@@ -401,9 +600,27 @@ function SpanDetails({ span }: { span: Span }) {
 					No input or output data available for this span.
 				</div>
 			)}
+			<OtherAttributes span={span} />
 		</div>
 	);
 }
+
+
+function OtherAttributes({ span }: { span: Span }) {
+	if ( ! span || ! span.attributes ) {
+		return null;
+	}
+	const attributes2 = {...span.attributes};	
+	delete attributes2.input;
+	delete attributes2.output;
+	return (
+	<div style={{ marginTop: '15px', minWidth: 0, maxWidth: '100%' }}>
+					<strong>Other Attributes:</strong>
+					<JsonObjectViewer json={attributes2} />
+				</div>
+	);
+}
+
 
 export default TraceDetailsPage;
 

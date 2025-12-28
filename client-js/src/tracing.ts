@@ -881,6 +881,84 @@ export function extractTraceContext(carrier: Record<string, string>) {
 }
 
 /**
+ * Get a span by its ID from the AIQA server.
+ * 
+ * @param spanId - The span ID as a hexadecimal string (16 characters) or client span ID
+ * @param organisationId - Optional organisation ID. If not provided, will try to get from
+ *   AIQA_ORGANISATION_ID environment variable. The organisation is typically extracted from
+ *   the API key during authentication, but the API requires it as a query parameter.
+ * @returns Promise that resolves to the span data, or undefined if not found
+ * 
+ * @example
+ * ```typescript
+ * import { getSpan } from './src/tracing';
+ * 
+ * const span = await getSpan('abc123...');
+ * if (span) {
+ *   console.log('Found span:', span.name);
+ * }
+ * ```
+ */
+export async function getSpan(spanId: string, organisationId?: string): Promise<any | undefined> {
+	const serverUrl = process.env.AIQA_SERVER_URL?.replace(/\/$/, '') || '';
+	const apiKey = process.env.AIQA_API_KEY || '';
+	const orgId = organisationId || process.env.AIQA_ORGANISATION_ID || '';
+	
+	if (!serverUrl) {
+		console.warn('AIQA: AIQA_SERVER_URL is not set. Cannot retrieve span.');
+		return undefined;
+	}
+	
+	if (!orgId) {
+		console.warn('AIQA: Organisation ID is required. Provide it as parameter or set AIQA_ORGANISATION_ID environment variable.');
+		return undefined;
+	}
+	
+	// Try both spanId and clientSpanId queries
+	for (const queryField of ['spanId', 'clientSpanId']) {
+		const url = `${serverUrl}/span`;
+		const params = new URLSearchParams({
+			q: `${queryField}:${spanId}`,
+			organisation: orgId,
+			limit: '1',
+		});
+		
+		const headers: Record<string, string> = {
+			'Content-Type': 'application/json',
+		};
+		if (apiKey) {
+			headers['Authorization'] = `ApiKey ${apiKey}`;
+		}
+		
+		try {
+			const response = await fetch(`${url}?${params.toString()}`, {
+				method: 'GET',
+				headers,
+			});
+			
+			if (response.status === 200) {
+				const result = await response.json();
+				const hits = result.hits || [];
+				if (hits.length > 0) {
+					return hits[0];
+				}
+			} else if (response.status === 400) {
+				// Try next query field
+				continue;
+			} else {
+				const errorText = await response.text().catch(() => 'Unknown error');
+				console.warn(`AIQA: Failed to get span: ${response.status} - ${errorText.substring(0, 200)}`);
+			}
+		} catch (error: any) {
+			console.warn(`AIQA: Error getting span: ${error.message}`);
+			continue;
+		}
+	}
+	
+	return undefined;
+}
+
+/**
  * Submit feedback for a trace by creating a new span with the same trace ID.
  * This allows you to add feedback (thumbs-up, thumbs-down, comment) to a trace after it has completed.
  * 

@@ -13,6 +13,8 @@ import io.opentelemetry.sdk.trace.SdkTracerProviderBuilder;
 import io.opentelemetry.sdk.trace.export.BatchSpanProcessor;
 import io.opentelemetry.semconv.ResourceAttributes;
 import dev.aiqa.exporter.AIQASpanExporter;
+import dev.aiqa.util.HttpClient;
+import okhttp3.HttpUrl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -293,6 +295,66 @@ public class Tracing {
             }
             return span;
         }
+    }
+
+    /**
+     * Get a span by its ID from the AIQA server.
+     *
+     * @param spanId The span ID as a hexadecimal string (16 characters) or client span ID
+     * @param organisationId Optional organisation ID. If null, will try to get from AIQA_ORGANISATION_ID
+     *   environment variable. The organisation is typically extracted from the API key during
+     *   authentication, but the API requires it as a query parameter.
+     * @return The span data as a Map, or null if not found
+     * @throws IOException if the request failed
+     *
+     * Example:
+     *   Map<String, Object> span = Tracing.getSpan("abc123...", null);
+     *   if (span != null) {
+     *       System.out.println("Found span: " + span.get("name"));
+     *   }
+     */
+    public static Map<String, Object> getSpan(String spanId, String organisationId) throws IOException {
+        String serverUrl = System.getenv("AIQA_SERVER_URL");
+        String apiKey = System.getenv("AIQA_API_KEY");
+        String orgId = organisationId != null ? organisationId : System.getenv("AIQA_ORGANISATION_ID");
+        
+        if (serverUrl == null || serverUrl.isEmpty()) {
+            logger.warn("AIQA_SERVER_URL is not set. Cannot retrieve span.");
+            return null;
+        }
+        
+        if (orgId == null || orgId.isEmpty()) {
+            logger.warn("Organisation ID is required. Provide it as parameter or set AIQA_ORGANISATION_ID environment variable.");
+            return null;
+        }
+        
+        // Remove trailing slash
+        serverUrl = serverUrl.replaceAll("/$", "");
+        
+        // Try both spanId and clientSpanId queries
+        String[] queryFields = {"spanId", "clientSpanId"};
+        for (String queryField : queryFields) {
+            try {
+                HttpClient httpClient = new HttpClient(serverUrl, apiKey);
+                HttpUrl.Builder urlBuilder = httpClient.urlBuilder("/span")
+                    .addQueryParameter("q", queryField + ":" + spanId)
+                    .addQueryParameter("organisation", orgId)
+                    .addQueryParameter("limit", "1");
+                
+                Map<String, Object> response = httpClient.get(urlBuilder.build().toString(), Map.class);
+                
+                @SuppressWarnings("unchecked")
+                java.util.List<Map<String, Object>> hits = (java.util.List<Map<String, Object>>) response.get("hits");
+                if (hits != null && !hits.isEmpty()) {
+                    return hits.get(0);
+                }
+            } catch (IOException e) {
+                // Try next query field
+                continue;
+            }
+        }
+        
+        return null;
     }
 
     /**

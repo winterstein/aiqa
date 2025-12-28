@@ -56,7 +56,7 @@ __all__ = [
     "get_provider", "get_exporter", "flush_tracing", "shutdown_tracing", "WithTracing",
     "set_span_attribute", "set_span_name", "get_active_span",
     "get_trace_id", "get_span_id", "create_span_from_trace_id", "inject_trace_context", "extract_trace_context",
-    "set_conversation_id", "set_component_tag", "set_token_usage", "set_provider_and_model", "submit_feedback"
+    "set_conversation_id", "set_component_tag", "set_token_usage", "set_provider_and_model", "get_span", "submit_feedback"
 ]
 
 
@@ -439,7 +439,8 @@ class TracedGenerator:
                 output_data["truncated"] = True
         
         output_data = _prepare_and_filter_output(output_data, self._filter_output, self._ignore_output)
-        self._span.set_attribute("output", serialize_for_span(output_data))
+        if output_data is not None:
+            self._span.set_attribute("output", serialize_for_span(output_data))
         self._span.set_status(Status(StatusCode.OK))
 
 
@@ -512,7 +513,8 @@ class TracedAsyncGenerator:
                 output_data["truncated"] = True
         
         output_data = _prepare_and_filter_output(output_data, self._filter_output, self._ignore_output)
-        self._span.set_attribute("output", serialize_for_span(output_data))
+        if output_data is not None:
+            self._span.set_attribute("output", serialize_for_span(output_data))
         self._span.set_status(Status(StatusCode.OK))
 
 
@@ -608,7 +610,8 @@ def WithTracing(
             _extract_and_set_provider_and_model(span, result)
             
             output_data = _prepare_and_filter_output(result, filter_output, ignore_output)
-            span.set_attribute("output", serialize_for_span(output_data))
+            if output_data is not None:
+                span.set_attribute("output", serialize_for_span(output_data))
             span.set_status(Status(StatusCode.OK))
         
         def _execute_with_span_sync(executor: Callable[[], Any], input_data: Any) -> Any:
@@ -1104,6 +1107,76 @@ def extract_trace_context(carrier: dict) -> Any:
     except Exception as e:
         logger.warning(f"Error extracting trace context: {e}")
         return None
+
+
+async def get_span(span_id: str, organisation_id: Optional[str] = None) -> Optional[dict]:
+    """
+    Get a span by its ID from the AIQA server.
+    
+    Args:
+        span_id: The span ID as a hexadecimal string (16 characters) or client span ID
+        organisation_id: Optional organisation ID. If not provided, will try to get from
+            AIQA_ORGANISATION_ID environment variable. The organisation is typically
+            extracted from the API key during authentication, but the API requires it
+            as a query parameter.
+    
+    Returns:
+        The span data as a dictionary, or None if not found
+    
+    Example:
+        from aiqa import get_span
+        
+        span = await get_span('abc123...')
+        if span:
+            print(f"Found span: {span['name']}")
+    """
+    import os
+    import aiohttp
+    
+    server_url = os.getenv("AIQA_SERVER_URL", "").rstrip("/")
+    api_key = os.getenv("AIQA_API_KEY", "")
+    org_id = organisation_id or os.getenv("AIQA_ORGANISATION_ID", "")
+    
+    if not server_url:
+        logger.warning("AIQA_SERVER_URL is not set. Cannot retrieve span.")
+        return None
+    
+    if not org_id:
+        logger.warning("Organisation ID is required. Provide it as parameter or set AIQA_ORGANISATION_ID environment variable.")
+        return None
+    
+    # Try both spanId and clientSpanId queries
+    for query_field in ["spanId", "clientSpanId"]:
+        url = f"{server_url}/span"
+        params = {
+            "q": f"{query_field}:{span_id}",
+            "organisation": org_id,
+            "limit": "1",
+        }
+        
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"ApiKey {api_key}"
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params, headers=headers) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        hits = result.get("hits", [])
+                        if hits:
+                            return hits[0]
+                    elif response.status == 400:
+                        # Try next query field
+                        continue
+                    else:
+                        error_text = await response.text()
+                        logger.warning(f"Failed to get span: {response.status} - {error_text[:200]}")
+        except Exception as e:
+            logger.warning(f"Error getting span: {e}")
+            continue
+    
+    return None
 
 
 async def submit_feedback(

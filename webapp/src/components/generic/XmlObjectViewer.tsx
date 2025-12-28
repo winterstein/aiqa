@@ -177,7 +177,7 @@ function XmlNodeViewer({ node, textComponent, depth = 2 }: { node: XmlNode, text
 	// Otherwise render as XML structure
 	if (!expanded) {
 		return (
-			<div className="border rounded p-2 my-2" style={{ borderColor: '#e0e0e0', maxWidth: '100%', minWidth: 0, overflowX: 'auto' }}>
+			<div className="my-2" style={{ marginLeft: '20px', borderLeft: '2px solid #ccc', paddingLeft: '10px', maxWidth: '100%', minWidth: 0, overflowX: 'auto' }}>
 				<div className="d-flex align-items-center mb-1">
 					<ExpandCollapseControl hasChildren={true} isExpanded={false} onToggle={() => setLocalDepth(1)} />
 					<span className="text-muted fst-italic me-2">
@@ -190,7 +190,7 @@ function XmlNodeViewer({ node, textComponent, depth = 2 }: { node: XmlNode, text
 	}
 	
 	return (
-		<div className="border rounded p-2 my-2" style={{ borderColor: '#e0e0e0', maxWidth: '100%', minWidth: 0, overflowX: 'auto' }}>
+		<div className="my-2" style={{ marginLeft: '20px', borderLeft: '2px solid #ccc', paddingLeft: '10px', maxWidth: '100%', minWidth: 0, overflowX: 'auto' }}>
 			<div className="d-flex align-items-center mb-1">
 				<ExpandCollapseControl hasChildren={true} isExpanded={true} onToggle={() => setLocalDepth(0)} />
 				<span className="fw-bold me-2" style={{ color: '#555' }}>
@@ -242,7 +242,7 @@ export default function XmlObjectViewer({ xml, textComponent, depth = 2 }: { xml
 		// If parsing fails, show raw XML with expand/collapse
 		if (xml.length > 1000) {
 			return (
-				<div className="border rounded p-2 my-2" style={{ borderColor: '#e0e0e0', maxWidth: '100%', minWidth: 0, overflowX: 'auto' }}>
+				<div className="my-2" style={{ marginLeft: '20px', borderLeft: '2px solid #ccc', paddingLeft: '10px', maxWidth: '100%', minWidth: 0, overflowX: 'auto' }}>
 					<div className="d-flex align-items-center mb-1">
 						<ExpandCollapseControl hasChildren={true} isExpanded={expanded} onToggle={() => setLocalDepth(expanded ? 0 : 1)} />
 						<span className="text-muted fst-italic me-2">XML ({xml.length} characters, parse failed)</span>
@@ -255,7 +255,7 @@ export default function XmlObjectViewer({ xml, textComponent, depth = 2 }: { xml
 			);
 		}
 		return (
-			<div className="border rounded p-2 my-2" style={{ borderColor: '#e0e0e0', maxWidth: '100%', minWidth: 0, overflowX: 'auto' }}>
+			<div className="my-2" style={{ marginLeft: '20px', borderLeft: '2px solid #ccc', paddingLeft: '10px', maxWidth: '100%', minWidth: 0, overflowX: 'auto' }}>
 				<div className="d-flex align-items-center mb-1">
 					<span className="text-muted fst-italic me-2">XML (parse failed)</span>
 					<span className="ms-2">{$copyButton}</span>

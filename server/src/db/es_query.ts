@@ -27,7 +27,8 @@ export function searchQueryToEsQuery(sq: SearchQuery | string | null | undefined
  */
 function buildEsQuery_oneBit(bit: any): any {
   if (typeof bit === 'string') {
-    return { match: { _all: bit } };
+    // Use query_string instead of deprecated _all field (removed in ES 6.0+)
+    return { query_string: { query: bit, default_operator: 'AND' } };
   }
   if (typeof bit === 'object' && !Array.isArray(bit)) {
     const keys = Object.keys(bit);
@@ -55,7 +56,8 @@ function buildEsQuery_oneBit(bit: any): any {
  */
 export function buildEsQuery(tree: any[]): any {
   if (typeof tree === 'string') {
-    return { match: { _all: tree } };
+    // Use query_string instead of deprecated _all field (removed in ES 6.0+)
+    return { query_string: { query: tree, default_operator: 'AND' } };
   }
 
   if (tree.length === 1) {
@@ -90,16 +92,6 @@ function getSortField(indexName: string): string {
   return indexName.includes('examples') ? 'created' : '@timestamp';
 }
 
-/**
- * Merge unindexed_attributes back into attributes for search results.
- */
-function mergeUnindexedAttributes(hit: any): any {
-  if (!hit.unindexed_attributes) return hit;
-  return {
-    ...hit,
-    attributes: { ...hit.attributes, ...hit.unindexed_attributes }
-  };
-}
 
 /**
  * Extract total count from Elasticsearch response (handles both formats).
@@ -110,6 +102,9 @@ function extractTotal(total: number | { value: number }): number {
 
 /**
  * Generic search function for Elasticsearch
+ * @param sourceFields - Array of field names to include in _source, or undefined for all fields.
+ * @param _source_includes - Array of field names to include in _source, or undefined for all fields.
+ * @param _source_excludes - Array of field names to exclude from _source, or undefined for no exclusions.
  */
 export async function searchEntities<T>(
   client: Client,
@@ -117,7 +112,9 @@ export async function searchEntities<T>(
   searchQuery?: SearchQuery | string | null,
   filters?: Record<string, string>,
   limit: number = 100,
-  offset: number = 0
+  offset: number = 0,
+  _source_includes?: string[] | null,
+  _source_excludes?: string[] | null
 ): Promise<{ hits: T[]; total: number }> {
   if (!client) {
     throw new Error('Elasticsearch client not initialized.');
@@ -139,17 +136,56 @@ export async function searchEntities<T>(
     mustClauses.push({ match_all: {} });
   }
 
-  const result = await client.search<T>({
+  // Build source filtering parameters for Elasticsearch
+  // https://www.elastic.co/guide/en/elasticsearch/reference/current/search-fields.html#source-filtering
+  // Handle unindexed_attributes automatically when attributes is included/excluded
+  let sourceIncludes = _source_includes;
+  let sourceExcludes = _source_excludes;
+  
+  if (sourceIncludes && sourceIncludes.length > 0) {
+    // Specific fields requested - if attributes is requested, also include unindexed_attributes for merging
+    if (sourceIncludes.includes('attributes') && !sourceIncludes.includes('unindexed_attributes')) {
+      sourceIncludes = [...sourceIncludes, 'unindexed_attributes'];
+    }
+  }
+  if (sourceExcludes && sourceExcludes.length > 0) {
+    // If attributes is excluded, also exclude unindexed_attributes
+    if (sourceExcludes.includes('attributes') && !sourceExcludes.includes('unindexed_attributes')) {
+      sourceExcludes = [...sourceExcludes, 'unindexed_attributes'];
+    }
+  }
+
+  // Build search request with source filtering
+  const searchParams: any = {
     index: indexName,
     query: { bool: { must: mustClauses } },
     size: limit,
     from: offset,
     sort: [{ [getSortField(indexName)]: { order: 'desc' } }]
+  };
+
+  // Add source filtering if specified
+  if (sourceIncludes && sourceIncludes.length > 0) {
+    searchParams.source_includes = sourceIncludes;
+  }
+  if (sourceExcludes && sourceExcludes.length > 0) {
+    searchParams.source_excludes = sourceExcludes;
+  }
+
+  const result = await client.search<T>(searchParams);
+
+  let hits = (result.hits.hits || [])
+    .map((hit: any) => hit._source!);
+  // Merge unindexed_attributes with attributes at the same level (unindexed_attributes takes priority)
+  hits = hits.map((hit: any) => {
+    if (hit.unindexed_attributes) {
+      const allAttributes = { ...(hit.attributes || {}), ...hit.unindexed_attributes };
+      hit.attributes = allAttributes;
+      delete hit.unindexed_attributes;
+    }
+    return hit;
   });
 
-  const hits = (result.hits.hits || [])
-    .map((hit: any) => hit._source!)
-    .map(mergeUnindexedAttributes);
   const total = extractTotal(result.hits.total as number | { value: number });
 
   return { hits, total };

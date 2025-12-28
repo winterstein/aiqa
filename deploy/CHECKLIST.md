@@ -12,7 +12,7 @@ Use this checklist to verify your deployment setup is complete.
 - [ ] SSH key pair generated for GitHub Actions
 - [ ] Public SSH key added to server's `~/.ssh/authorized_keys`
 
-## GitHub Secrets Configuration
+## GitHub Secrets / Variables Configuration
 
 - [ ] `DEPLOY_HOST` - Server IP/hostname
 - [ ] `DEPLOY_USER` - SSH username

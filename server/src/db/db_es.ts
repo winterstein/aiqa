@@ -91,15 +91,6 @@ function generateEsMappingsFromSchema(properties: Record<string, any>): Record<s
   return mappings;
 }
 
-/**
- * Add unindexed_attributes mapping to a mappings object.
- */
-function addUnindexedAttributesMapping(mappings: any): void {
-  mappings.unindexed_attributes = {
-    type: 'object',
-    enabled: false  // Disable indexing to allow storing large values without truncation
-  };
-}
 
 // Generate Elasticsearch mappings from Span schema
 function generateSpanMappings(): any {
@@ -112,7 +103,11 @@ function generateSpanMappings(): any {
   
   // Generate all mappings from schema (including nested objects)
   const mappings = generateEsMappingsFromSchema(spanDef.properties);
-  addUnindexedAttributesMapping(mappings);
+  // "hidden" backend support for large attributes that get truncated
+  mappings.unindexed_attributes = {
+    type: 'object',
+    enabled: false  // Disable indexing to allow storing large values without truncation
+  };
   return mappings;
 }
 
@@ -138,9 +133,7 @@ function generateExampleMappings(): any {
   // Special handling for inputs field - store as-is, not indexed
   if (mappings.inputs) {
     mappings.inputs = { type: 'object', enabled: false };
-  }
-  
-  addUnindexedAttributesMapping(mappings);
+  }  
   return mappings;
 }
 
@@ -440,12 +433,14 @@ async function searchEntities<T>(
   searchQuery?: SearchQuery | string | null,
   filters?: Record<string, string>,
   limit: number = 100,
-  offset: number = 0
+  offset: number = 0,
+  _source_includes?: string[] | null,
+  _source_excludes?: string[] | null
 ): Promise<{ hits: T[]; total: number }> {
   if (!client) {
     throw new Error('Elasticsearch client not initialized.');
   }
-  return searchEntitiesEs<T>(client, indexName, searchQuery, filters, limit, offset);
+  return searchEntitiesEs<T>(client, indexName, searchQuery, filters, limit, offset, _source_includes, _source_excludes);
 }
 
 /**
@@ -571,19 +566,25 @@ export async function bulkInsertSpans(spans: Span[]): Promise<void> {
 /**
  * Search spans in 'traces' index. Filters by organisationId if provided.
  * @param searchQuery - Gmail-style search query or SearchQuery instance. Returns all if null.
+ * @param _source_includes - Array of field names to include in _source, or undefined for all fields.
+ * @param _source_excludes - Array of field names to exclude from _source, or undefined for no exclusions. You are strongly encouraged to exclude attributes and unindexed_attributes using this to avoid returning big data.
  */
 export async function searchSpans(
   searchQuery?: SearchQuery | string | null,
   organisationId?: string,
   limit: number = 100,
-  offset: number = 0
-): Promise<{ hits: Span[]; total: number }> {
+  offset: number = 0,
+  _source_includes?: string[] | null,
+  _source_excludes?: string[] | null
+): Promise<{ hits: Span[]; total: number }> {    
   return searchEntities<Span>(
     SPAN_INDEX_ALIAS,
     searchQuery,
     { organisation: organisationId },
     limit,
-    offset
+    offset,
+    _source_includes,
+    _source_excludes
   );
 }
 

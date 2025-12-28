@@ -35,6 +35,7 @@ from .tracing import (
     extract_trace_context,
     set_conversation_id,
     set_component_tag,
+    get_span,
 )
 from .client import get_aiqa_client
 from .experiment_runner import ExperimentRunner
@@ -59,6 +60,7 @@ __all__ = [
     "extract_trace_context",
     "set_conversation_id",
     "set_component_tag",
+    "get_span",
     "__version__",
 ]
 

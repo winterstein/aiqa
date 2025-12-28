@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"io"
 	"math"
+	"net/http"
 	"os"
 	"reflect"
 	"runtime"
@@ -1105,6 +1107,86 @@ func ExtractTraceContext(ctx context.Context, carrier map[string]string) context
 type FeedbackOptions struct {
 	ThumbsUp *bool  // true for positive, false for negative, nil for neutral
 	Comment  string // Optional text comment
+}
+
+// GetSpan gets a span by its ID from the AIQA server.
+//
+// spanId: The span ID as a hexadecimal string (16 characters) or client span ID
+// organisationId: Optional organisation ID. If empty, will try to get from AIQA_ORGANISATION_ID
+//   environment variable. The organisation is typically extracted from the API key during
+//   authentication, but the API requires it as a query parameter.
+// Returns: The span data as a map, or nil if not found, and an error if the request failed
+//
+// Example:
+//   span, err := GetSpan(ctx, "abc123...", "")
+//   if err != nil {
+//       log.Fatal(err)
+//   }
+//   if span != nil {
+//       log.Printf("Found span: %v", span["name"])
+//   }
+func GetSpan(ctx context.Context, spanId string, organisationId string) (map[string]interface{}, error) {
+	serverURL := os.Getenv("AIQA_SERVER_URL")
+	apiKey := os.Getenv("AIQA_API_KEY")
+	orgID := organisationId
+	if orgID == "" {
+		orgID = os.Getenv("AIQA_ORGANISATION_ID")
+	}
+	
+	if serverURL == "" {
+		return nil, fmt.Errorf("AIQA_SERVER_URL is not set. Cannot retrieve span")
+	}
+	
+	if orgID == "" {
+		return nil, fmt.Errorf("Organisation ID is required. Provide it as parameter or set AIQA_ORGANISATION_ID environment variable")
+	}
+	
+	// Remove trailing slash
+	serverURL = strings.TrimSuffix(serverURL, "/")
+	
+	// Try both spanId and clientSpanId queries
+	queryFields := []string{"spanId", "clientSpanId"}
+	for _, queryField := range queryFields {
+		url := fmt.Sprintf("%s/span?q=%s:%s&organisation=%s&limit=1", serverURL, queryField, spanId, orgID)
+		
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		
+		req.Header.Set("Content-Type", "application/json")
+		if apiKey != "" {
+			req.Header.Set("Authorization", fmt.Sprintf("ApiKey %s", apiKey))
+		}
+		
+		client := &http.Client{Timeout: 30 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to send request: %w", err)
+		}
+		defer resp.Body.Close()
+		
+		if resp.StatusCode == 200 {
+			var result struct {
+				Hits  []map[string]interface{} `json:"hits"`
+				Total int                     `json:"total"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+				return nil, fmt.Errorf("failed to decode response: %w", err)
+			}
+			if len(result.Hits) > 0 {
+				return result.Hits[0], nil
+			}
+		} else if resp.StatusCode == 400 {
+			// Try next query field
+			continue
+		} else {
+			body, _ := io.ReadAll(resp.Body)
+			return nil, fmt.Errorf("failed to get span: %d %s - %s", resp.StatusCode, resp.Status, string(body))
+		}
+	}
+	
+	return nil, nil
 }
 
 // SubmitFeedback submits feedback for a trace by creating a new span with the same trace ID.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractBlocks, Block } from './TextWithStructureViewer';
+import { extractBlocks, extractBlockJson, Block } from './extractBlocks';
 
 describe('extractBlocks', () => {
 	it('should return a single text block when no structured content is found', () => {
@@ -170,6 +170,122 @@ describe('extractBlocks', () => {
 		const ids = blocks.map(b => b.id).filter(id => id !== undefined);
 		const uniqueIds = new Set(ids);
 		expect(uniqueIds.size).toBe(ids.length);
+	});
+});
+
+describe('extractBlockJson', () => {
+	it('should extract a complete JSON object', () => {
+		const text = '{"name": "test", "value": 123}';
+		const result = extractBlockJson(text, 0);
+		
+		expect(result.success).toBe(true);
+		expect(result.jsonContent).toEqual({ name: 'test', value: 123 });
+		expect(result.endPos).toBe(text.length);
+	});
+
+	it('should extract a complete JSON array', () => {
+		const text = '[1, 2, 3, "test"]';
+		const result = extractBlockJson(text, 0);
+		
+		expect(result.success).toBe(true);
+		expect(result.jsonContent).toEqual([1, 2, 3, 'test']);
+		expect(result.endPos).toBe(text.length);
+	});
+
+	it('should handle nested JSON objects', () => {
+		const text = '{"outer": {"inner": "value"}}';
+		const result = extractBlockJson(text, 0);
+		
+		expect(result.success).toBe(true);
+		expect(result.jsonContent).toEqual({ outer: { inner: 'value' } });
+	});
+
+	it('should handle JSON with escaped quotes', () => {
+		const text = '{"quote": "He said \\"hello\\""}';
+		const result = extractBlockJson(text, 0);
+		
+		expect(result.success).toBe(true);
+		expect(result.jsonContent).toEqual({ quote: 'He said "hello"' });
+	});
+
+	it('should handle truncated JSON object (missing closing brace)', () => {
+		const text = '{"name": "test", "value": 123';
+		const result = extractBlockJson(text, 0);
+		
+		expect(result.success).toBe(true);
+		expect(result.jsonContent).toEqual({ name: 'test', value: 123 });
+	});
+
+	it('should handle truncated JSON object (missing closing brace and value)', () => {
+		const text = '{"name": "test", "value":';
+		const result = extractBlockJson(text, 0);
+		
+		expect(result.success).toBe(true);
+		expect(result.jsonContent).toEqual({ name: 'test', value: null });
+	});
+
+	it('should handle truncated JSON object (unclosed string)', () => {
+		const text = '{"name": "test';
+		const result = extractBlockJson(text, 0);
+		
+		expect(result.success).toBe(true);
+		expect(result.jsonContent).toEqual({ name: 'test' });
+	});
+
+	it('should handle truncated JSON array (missing closing bracket)', () => {
+		const text = '[1, 2, 3';
+		const result = extractBlockJson(text, 0);
+		
+		expect(result.success).toBe(true);
+		expect(result.jsonContent).toEqual([1, 2, 3]);
+	});
+
+	it('should handle truncated nested JSON', () => {
+		const text = '{"outer": {"inner": "value"';
+		const result = extractBlockJson(text, 0);
+		
+		expect(result.success).toBe(true);
+		expect(result.jsonContent).toEqual({ outer: { inner: 'value' } });
+	});
+
+	it('should handle truncated JSON with multiple nested objects', () => {
+		const text = '{"a": {"b": {"c": 123';
+		const result = extractBlockJson(text, 0);
+		
+		expect(result.success).toBe(true);
+		expect(result.jsonContent).toEqual({ a: { b: { c: 123 } } });
+	});
+
+	it('should not treat JSON with newlines as truncated', () => {
+		const text = '{\n  "name": "test"\n';
+		const result = extractBlockJson(text, 0);
+		
+		// Should fail because it's not complete and has newlines (doesn't look truncated)
+		expect(result.success).toBe(false);
+	});
+
+	it('should handle JSON starting in the middle of text', () => {
+		const text = 'Some text {"name": "test"} more text';
+		const result = extractBlockJson(text, 10);
+		
+		expect(result.success).toBe(true);
+		expect(result.jsonContent).toEqual({ name: 'test' });
+		expect(result.endPos).toBe(26); // Position after the closing '}'
+	});
+
+	it('should return failure for invalid starting position', () => {
+		const text = 'Some text';
+		const result = extractBlockJson(text, 0);
+		
+		expect(result.success).toBe(false);
+	});
+
+	it('should handle truncated JSON array with nested objects', () => {
+		const text = '[{"name": "test", "value": 123';
+		const result = extractBlockJson(text, 0);
+		
+		expect(result.success).toBe(true);
+		expect(result.jsonContent).toEqual([{ name: 'test', value: 123 }]);
 	});
 });
 

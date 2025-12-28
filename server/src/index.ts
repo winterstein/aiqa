@@ -34,17 +34,14 @@ import {
   getOrganisationMembers,
 } from './db/db_sql.js';
 import {
-  bulkInsertSpans,
   bulkInsertExamples,
-  searchSpans,
   searchExamples,
 } from './db/db_es.js';
 import { authenticate, authenticateWithJwtFromHeader, AuthenticatedRequest } from './server_auth.js';
 import SearchQuery from './common/SearchQuery.js';
-import Span from './common/types/Span.js';
 import Example from './common/types/Example.js';
 import { registerExperimentRoutes } from './routes/experiments.js';
-import { addTokenCost } from './token_cost.js';
+import { registerSpanRoutes } from './routes/spans.js';
 
 dotenv.config();
 
@@ -92,52 +89,6 @@ fastify.addHook('onRequest', async (request, reply) => {
 // Health check
 fastify.get('/health', async () => {
   return { status: 'ok' };
-});
-
-// ===== SPAN ENDPOINTS (ElasticSearch) =====
-fastify.post('/span', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
-  const organisation = request.organisation!;
-  const spans = request.body as Span | Span[];
-
-  const spansArray = Array.isArray(spans) ? spans : [spans];
-  
-  // Add organisation to each span
-  const spansWithOrg = spansArray.map(span => ({
-    ...span,
-    organisation,
-  }));
-  console.log("inserting: "+spansWithOrg.length+" spans");
-  // TODO rate limit check
-  // Add token cost
-  spansArray.forEach(span => addTokenCost(span));
-  // save
-  await bulkInsertSpans(spansWithOrg);
-  return { success: true, count: spansWithOrg.length };
-});
-
-/**
- * Query spans
- */
-fastify.get('/span', { preHandler: authenticate }, async (request: AuthenticatedRequest, reply) => {
-	const organisationId = (request.query as any).organisation as string | undefined;
-	if (!organisationId) {
-	  reply.code(400).send({ error: 'organisation query parameter is required' });
-	  return;
-	}
-  console.log("organisationId", organisationId);
-  const query = (request.query as any).q as string | undefined;
-  const limit = parseInt((request.query as any).limit || '100');
-  const offset = parseInt((request.query as any).offset || '0');
-
-  const searchQuery = query ? new SearchQuery(query) : null;
-  const result = await searchSpans(searchQuery, organisationId, limit, offset);
-  
-  return {
-    hits: result.hits,
-    total: result.total,
-    limit,
-    offset,
-  };
 });
 
 // ===== ORGANISATION ENDPOINTS (PostgreSQL) =====
@@ -509,6 +460,9 @@ const start = async () => {
     
     // Register experiment routes
     await registerExperimentRoutes(fastify);
+    
+    // Register span routes
+    await registerSpanRoutes(fastify);
     
     const port = parseInt(process.env.PORT || '4001');
     await fastify.listen({ port, host: '0.0.0.0' });
