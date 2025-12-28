@@ -6,8 +6,11 @@ Handles objects, dataclasses, circular references, and size limits.
 import json
 import os
 import dataclasses
+import logging
 from datetime import datetime, date, time
 from typing import Any, Callable, Set
+
+logger = logging.getLogger("aiqa")
 
 def toNumber(value: str|int|None) -> int:
     """Convert string to number. handling units like g, m, k, (also mb kb gb though these should be avoided)"""
@@ -195,24 +198,39 @@ def object_to_dict(obj: Any, visited: Set[int], max_depth: int = 10, current_dep
         try:
             result = {}
             for k, v in obj.items():
-                key_str = str(k) if not isinstance(k, (str, int, float, bool)) else k
-                filtered_value = _apply_data_filters(key_str, v)
-                result[key_str] = object_to_dict(filtered_value, visited, max_depth, current_depth + 1)
+                try:
+                    key_str = str(k) if not isinstance(k, (str, int, float, bool)) else k
+                    filtered_value = _apply_data_filters(key_str, v)
+                    result[key_str] = object_to_dict(filtered_value, visited, max_depth, current_depth + 1)
+                except Exception as e:
+                    # If one key-value pair fails, log and use string representation for the value
+                    key_str = str(k) if not isinstance(k, (str, int, float, bool)) else k
+                    logger.debug(f"Failed to convert dict value for key '{key_str}': {e}")
+                    result[key_str] = safe_str_repr(v)
             visited.remove(obj_id)
             return result
-        except Exception:
+        except Exception as e:
             visited.discard(obj_id)
+            logger.debug(f"Failed to convert dict to dict: {e}")
             return safe_str_repr(obj)
     
     # Handle list/tuple
     if isinstance(obj, (list, tuple)):
         visited.add(obj_id)
         try:
-            result = [object_to_dict(item, visited, max_depth, current_depth + 1) for item in obj]
+            result = []
+            for item in obj:
+                try:
+                    result.append(object_to_dict(item, visited, max_depth, current_depth + 1))
+                except Exception as e:
+                    # If one item fails, log and use its string representation
+                    logger.debug(f"Failed to convert list item {type(item).__name__} to dict: {e}")
+                    result.append(safe_str_repr(item))
             visited.remove(obj_id)
             return result
-        except Exception:
+        except Exception as e:
             visited.discard(obj_id)
+            logger.debug(f"Failed to convert list/tuple to dict: {e}")
             return safe_str_repr(obj)
     
     # Handle dataclasses
@@ -221,13 +239,19 @@ def object_to_dict(obj: Any, visited: Set[int], max_depth: int = 10, current_dep
         try:
             result = {}
             for field in dataclasses.fields(obj):
-                value = getattr(obj, field.name, None)
-                filtered_value = _apply_data_filters(field.name, value)
-                result[field.name] = object_to_dict(filtered_value, visited, max_depth, current_depth + 1)
+                try:
+                    value = getattr(obj, field.name, None)
+                    filtered_value = _apply_data_filters(field.name, value)
+                    result[field.name] = object_to_dict(filtered_value, visited, max_depth, current_depth + 1)
+                except Exception as e:
+                    # If accessing a field fails, log and skip it
+                    logger.debug(f"Failed to access field {field.name} on {type(obj).__name__}: {e}")
+                    result[field.name] = "<error accessing field>"
             visited.remove(obj_id)
             return result
-        except Exception:
+        except Exception as e:
             visited.discard(obj_id)
+            logger.debug(f"Failed to convert dataclass {type(obj).__name__} to dict: {e}")
             return safe_str_repr(obj)
     
     # Handle objects with __dict__
@@ -242,8 +266,10 @@ def object_to_dict(obj: Any, visited: Set[int], max_depth: int = 10, current_dep
                     result[key] = object_to_dict(filtered_value, visited, max_depth, current_depth + 1)
             visited.remove(obj_id)
             return result
-        except Exception:
+        except Exception as e:
             visited.discard(obj_id)
+            # Log the error for debugging, but still return string representation
+            logger.debug(f"Failed to convert object {type(obj).__name__} to dict: {e}")
             return safe_str_repr(obj)
     
     # Handle objects with __slots__
@@ -252,14 +278,20 @@ def object_to_dict(obj: Any, visited: Set[int], max_depth: int = 10, current_dep
         try:
             result = {}
             for slot in obj.__slots__:
-                if hasattr(obj, slot):
-                    value = getattr(obj, slot, None)
-                    filtered_value = _apply_data_filters(slot, value)
-                    result[slot] = object_to_dict(filtered_value, visited, max_depth, current_depth + 1)
+                try:
+                    if hasattr(obj, slot):
+                        value = getattr(obj, slot, None)
+                        filtered_value = _apply_data_filters(slot, value)
+                        result[slot] = object_to_dict(filtered_value, visited, max_depth, current_depth + 1)
+                except Exception as e:
+                    # If accessing a slot fails, log and skip it
+                    logger.debug(f"Failed to access slot {slot} on {type(obj).__name__}: {e}")
+                    result[slot] = "<error accessing slot>"
             visited.remove(obj_id)
             return result
-        except Exception:
+        except Exception as e:
             visited.discard(obj_id)
+            logger.debug(f"Failed to convert slotted object {type(obj).__name__} to dict: {e}")
             return safe_str_repr(obj)
     
     # Fallback: try to get a few common attributes
@@ -301,14 +333,16 @@ def safe_json_dumps(value: Any) -> str:
     # across the whole object graph
     try:
         converted = object_to_dict(value, visited)
-    except Exception:
+    except Exception as e:
         # If conversion fails, try with a fresh visited set and json default handler
+        logger.debug(f"object_to_dict failed for {type(value).__name__}, trying json.dumps with default handler: {e}")
         try:
             json_str = json.dumps(value, default=json_default_handler_factory(set()))
             if len(json_str) > max_size_chars:
                 return f"<object {type(value)} too large: {len(json_str)} chars (limit: {max_size_chars} chars) begins: {json_str[:100]}... conversion error: {e}>"
             return json_str
-        except Exception:
+        except Exception as e2:
+            logger.debug(f"json.dumps with default handler also failed for {type(value).__name__}: {e2}")
             return safe_str_repr(value)
     
     # Try JSON serialization of the converted structure
@@ -318,7 +352,8 @@ def safe_json_dumps(value: Any) -> str:
         if len(json_str) > max_size_chars:
             return f"<object {type(value)} too large: {len(json_str)} chars (limit: {max_size_chars} chars) begins: {json_str[:100]}...>"
         return json_str
-    except Exception:
+    except Exception as e:
+        logger.debug(f"json.dumps total fail for {type(value).__name__}: {e2}")
         # Final fallback
         return safe_str_repr(value)
 

@@ -27,6 +27,7 @@ class AIQASpanExporter(SpanExporter):
         server_url: Optional[str] = None,
         api_key: Optional[str] = None,
         flush_interval_seconds: float = 5.0,
+        max_batch_size_bytes: int = 5 * 1024 * 1024,  # 5MB default
     ):
         """
         Initialize the AIQA span exporter.
@@ -35,10 +36,12 @@ class AIQASpanExporter(SpanExporter):
             server_url: URL of the AIQA server (defaults to AIQA_SERVER_URL env var)
             api_key: API key for authentication (defaults to AIQA_API_KEY env var)
             flush_interval_seconds: How often to flush spans to the server
+            max_batch_size_bytes: Maximum size of a single batch in bytes (default: 5mb)
         """
         self._server_url = server_url
         self._api_key = api_key
         self.flush_interval_ms = flush_interval_seconds * 1000
+        self.max_batch_size_bytes = max_batch_size_bytes
         self.buffer: List[Dict[str, Any]] = []
         self.buffer_span_keys: set = set()  # Track (traceId, spanId) tuples to prevent duplicates (Python 3.8 compatible)
         self.buffer_lock = threading.Lock()
@@ -243,6 +246,59 @@ class AIQASpanExporter(SpanExporter):
             self.buffer.clear()
             self.buffer_span_keys.clear()
 
+    def _split_into_batches(self, spans: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
+        """
+        Split spans into batches based on max_batch_size_bytes.
+        Each batch will be as large as possible without exceeding the limit.
+        If a single span exceeds the limit, it will be sent in its own batch with a warning.
+        """
+        if not spans:
+            return []
+        
+        batches = []
+        current_batch = []
+        current_batch_size = 0
+        
+        for span in spans:
+            # Estimate size of this span when serialized
+            span_json = json.dumps(span)
+            span_size = len(span_json.encode('utf-8'))
+            
+            # Check if this single span exceeds the limit
+            if span_size > self.max_batch_size_bytes:
+                # If we have a current batch, save it first
+                if current_batch:
+                    batches.append(current_batch)
+                    current_batch = []
+                    current_batch_size = 0
+                
+                # Log warning about oversized span
+                span_name = span.get('name', 'unknown')
+                span_trace_id = span.get('traceId', 'unknown')
+                logger.warning(
+                    f"Span '{span_name}' (traceId={span_trace_id}) exceeds max_batch_size_bytes "
+                    f"({span_size} bytes > {self.max_batch_size_bytes} bytes). "
+                    f"Will attempt to send it anyway - may fail if server/nginx limit is exceeded."
+                )
+                # Still create a batch with just this span - we'll try to send it
+                batches.append([span])
+                continue
+            
+            # If adding this span would exceed the limit, start a new batch
+            if current_batch and current_batch_size + span_size > self.max_batch_size_bytes:
+                batches.append(current_batch)
+                current_batch = []
+                current_batch_size = 0
+            
+            current_batch.append(span)
+            current_batch_size += span_size
+        
+        # Add the last batch if it has any spans
+        if current_batch:
+            batches.append(current_batch)
+        
+        return batches
+
     async def flush(self) -> None:
         """
         Flush buffered spans to the server. Thread-safe: ensures only one flush operation runs at a time.
@@ -345,77 +401,108 @@ class AIQASpanExporter(SpanExporter):
         logger.info(f"Auto-flush thread started: {flush_thread.name} (daemon={flush_thread.daemon})")
 
     async def _send_spans(self, spans: List[Dict[str, Any]]) -> None:
-        """Send spans to the server API (async)."""
+        """Send spans to the server API (async). Batches large payloads automatically."""
         import aiohttp
 
+        # Split into batches if needed
+        batches = self._split_into_batches(spans)
+        if len(batches) > 1:
+            logger.info(f"_send_spans() splitting {len(spans)} spans into {len(batches)} batches")
+        
         url = self._get_span_url()
         headers = self._build_request_headers()
-        logger.debug(f"_send_spans() sending {len(spans)} spans to {url}")
+        
         if self.api_key:
             logger.debug("_send_spans() using API key authentication")
         else:
             logger.debug("_send_spans() no API key provided")
 
-        try:
-            # Pre-serialize JSON to bytes and wrap in BytesIO to avoid blocking event loop
-            json_bytes = json.dumps(spans).encode('utf-8')
-            data = io.BytesIO(json_bytes)
-            
-            async with aiohttp.ClientSession() as session:
-                logger.debug(f"_send_spans() POST request starting to {url}")
-                async with session.post(url, data=data, headers=headers) as response:
-                    logger.debug(f"_send_spans() received response: status={response.status}")
-                    if not response.ok:
-                        error_text = await response.text()
-                        logger.error(
-                            f"_send_spans() failed: status={response.status}, "
-                            f"reason={response.reason}, error={error_text[:200]}"
-                        )
-                        raise Exception(
-                            f"Failed to send spans: {response.status} {response.reason} - {error_text}"
-                        )
-                    logger.debug(f"_send_spans() successfully sent {len(spans)} spans")
-        except RuntimeError as e:
-            if self._is_interpreter_shutdown_error(e):
-                if self.shutdown_requested:
-                    logger.debug(f"_send_spans() skipped due to interpreter shutdown: {e}")
-                else:
-                    logger.warning(f"_send_spans() interrupted by interpreter shutdown: {e}")
-                raise
-            logger.error(f"_send_spans() RuntimeError: {type(e).__name__}: {e}")
-            raise
-        except Exception as e:
-            logger.error(f"_send_spans() exception: {type(e).__name__}: {e}")
-            raise
+        errors = []
+        async with aiohttp.ClientSession() as session:
+            for batch_idx, batch in enumerate(batches):
+                try:
+                    logger.debug(f"_send_spans() sending batch {batch_idx + 1}/{len(batches)} with {len(batch)} spans to {url}")
+                    # Pre-serialize JSON to bytes and wrap in BytesIO to avoid blocking event loop
+                    json_bytes = json.dumps(batch).encode('utf-8')
+                    data = io.BytesIO(json_bytes)
+                    
+                    async with session.post(url, data=data, headers=headers) as response:
+                        logger.debug(f"_send_spans() batch {batch_idx + 1} received response: status={response.status}")
+                        if not response.ok:
+                            error_text = await response.text()
+                            error_msg = f"Failed to send batch {batch_idx + 1}/{len(batches)}: {response.status} {response.reason} - {error_text[:200]}"
+                            logger.error(f"_send_spans() {error_msg}")
+                            errors.append((batch_idx + 1, error_msg))
+                            # Continue with other batches even if one fails
+                            continue
+                        logger.debug(f"_send_spans() batch {batch_idx + 1} successfully sent {len(batch)} spans")
+                except RuntimeError as e:
+                    if self._is_interpreter_shutdown_error(e):
+                        if self.shutdown_requested:
+                            logger.debug(f"_send_spans() skipped due to interpreter shutdown: {e}")
+                        else:
+                            logger.warning(f"_send_spans() interrupted by interpreter shutdown: {e}")
+                        raise
+                    error_msg = f"RuntimeError in batch {batch_idx + 1}: {type(e).__name__}: {e}"
+                    logger.error(f"_send_spans() {error_msg}")
+                    errors.append((batch_idx + 1, error_msg))
+                    # Continue with other batches
+                except Exception as e:
+                    error_msg = f"Exception in batch {batch_idx + 1}: {type(e).__name__}: {e}"
+                    logger.error(f"_send_spans() {error_msg}")
+                    errors.append((batch_idx + 1, error_msg))
+                    # Continue with other batches
+        
+        # If any batches failed, raise an exception with details
+        if errors:
+            error_summary = "; ".join([f"batch {idx}: {msg}" for idx, msg in errors])
+            raise Exception(f"Failed to send some spans: {error_summary}")
+        
+        logger.debug(f"_send_spans() successfully sent all {len(spans)} spans in {len(batches)} batch(es)")
 
     def _send_spans_sync(self, spans: List[Dict[str, Any]]) -> None:
-        """Send spans to the server API (synchronous, for shutdown scenarios)."""
+        """Send spans to the server API (synchronous, for shutdown scenarios). Batches large payloads automatically."""
         import requests
 
+        # Split into batches if needed
+        batches = self._split_into_batches(spans)
+        if len(batches) > 1:
+            logger.info(f"_send_spans_sync() splitting {len(spans)} spans into {len(batches)} batches")
+        
         url = self._get_span_url()
         headers = self._build_request_headers()
-        logger.debug(f"_send_spans_sync() sending {len(spans)} spans to {url}")
+        
         if self.api_key:
             logger.debug("_send_spans_sync() using API key authentication")
         else:
             logger.debug("_send_spans_sync() no API key provided")
 
-        try:
-            response = requests.post(url, json=spans, headers=headers, timeout=10.0)
-            logger.debug(f"_send_spans_sync() received response: status={response.status_code}")
-            if not response.ok:
-                error_text = response.text[:200] if response.text else ""
-                logger.error(
-                    f"_send_spans_sync() failed: status={response.status_code}, "
-                    f"reason={response.reason}, error={error_text}"
-                )
-                raise Exception(
-                    f"Failed to send spans: {response.status_code} {response.reason} - {error_text}"
-                )
-            logger.debug(f"_send_spans_sync() successfully sent {len(spans)} spans")
-        except Exception as e:
-            logger.error(f"_send_spans_sync() exception: {type(e).__name__}: {e}")
-            raise
+        errors = []
+        for batch_idx, batch in enumerate(batches):
+            try:
+                logger.debug(f"_send_spans_sync() sending batch {batch_idx + 1}/{len(batches)} with {len(batch)} spans to {url}")
+                response = requests.post(url, json=batch, headers=headers, timeout=10.0)
+                logger.debug(f"_send_spans_sync() batch {batch_idx + 1} received response: status={response.status_code}")
+                if not response.ok:
+                    error_text = response.text[:200] if response.text else ""
+                    error_msg = f"Failed to send batch {batch_idx + 1}/{len(batches)}: {response.status_code} {response.reason} - {error_text}"
+                    logger.error(f"_send_spans_sync() {error_msg}")
+                    errors.append((batch_idx + 1, error_msg))
+                    # Continue with other batches even if one fails
+                    continue
+                logger.debug(f"_send_spans_sync() batch {batch_idx + 1} successfully sent {len(batch)} spans")
+            except Exception as e:
+                error_msg = f"Exception in batch {batch_idx + 1}: {type(e).__name__}: {e}"
+                logger.error(f"_send_spans_sync() {error_msg}")
+                errors.append((batch_idx + 1, error_msg))
+                # Continue with other batches
+        
+        # If any batches failed, raise an exception with details
+        if errors:
+            error_summary = "; ".join([f"batch {idx}: {msg}" for idx, msg in errors])
+            raise Exception(f"Failed to send some spans: {error_summary}")
+        
+        logger.debug(f"_send_spans_sync() successfully sent all {len(spans)} spans in {len(batches)} batch(es)")
 
     def shutdown(self) -> None:
         """Shutdown the exporter, flushing any remaining spans. Call before process exit."""

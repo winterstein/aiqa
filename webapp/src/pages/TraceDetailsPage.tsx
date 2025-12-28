@@ -581,6 +581,9 @@ function OtherAttributes({ span }: { span: Span }) {
 	delete attributes2.input;
 	delete attributes2.output;
 	delete attributes2.attributes; // In case of badly nested attributes (which suggests a client bug)
+	if (Object.keys(attributes2).length === 0) {
+		return null;
+	}
 	return (
 	<div style={{ marginTop: '15px', minWidth: 0, maxWidth: '100%' }}>
 					<strong>Other Attributes:</strong>

@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import CopyButton from './CopyButton';
 import ExpandCollapseControl from './ExpandCollapseControl';
+import { truncate } from '../../common/utils/miscutils';
 
 /**
  * A component to display a JSON object in a readable format.
@@ -146,11 +147,27 @@ export default function JsonObjectViewer({ json, textComponent, depth = 2 }: { j
 		const keyCount = Object.keys(json).length;
 
 		if (!expanded) {
+			let summary;
+			for(const key of ['name', 'description', 'title', 'summary', 'message', 'error']) {
+				if (json[key]) {
+					let v = json[key];
+					let vs = ""+v;
+					if (typeof v === 'number') {
+						vs = v.toFixed(2);
+					} else if (typeof v === 'boolean') {
+						vs = v ? "true" : "false";
+					} else if (typeof v === 'object') {
+						vs = JSON.stringify(v);
+					}
+					summary = <span className="text-muted me-2">{key}: {truncate(vs, 60)}</span>;
+					break;
+				}
+			}
 			return (
 				<div className="my-2" style={{ marginLeft: '20px', borderLeft: '2px solid #ccc', paddingLeft: '10px', maxWidth: '100%', minWidth: 0, overflowX: 'auto' }}>
 					<div className="d-flex align-items-center mb-1">
 						<ExpandCollapseControl hasChildren={true} isExpanded={false} onToggle={() => setLocalDepth(1)} />
-						<span className="text-muted fst-italic me-2">Object ({keyCount} keys)</span>
+						<span className="text-muted fst-italic me-2">Object ({keyCount} keys) {summary}</span>
 						{hasKeys && <span className="ms-2">{$copyButton}</span>}
 					</div>
 				</div>

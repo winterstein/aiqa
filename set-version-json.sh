@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Bump this version when you make a change to the codebase
-VERSION="0.3.2"
+VERSION="0.3.3"
 
 # Ideally this should be auto-run (fiddly with git hooks)
 
