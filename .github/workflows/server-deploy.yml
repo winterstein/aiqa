@@ -36,7 +36,7 @@ jobs:
         working-directory: ./server
         run: pnpm run build
 
-      - name: Deploy to server
+      - name: Deploy to temporary location
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ env.DEPLOY_HOST }}
@@ -44,9 +44,52 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT || 22 }}
           source: "server/dist,server/package.json,server/pnpm-lock.yaml"
-          target: "/opt/aiqa/server"
+          target: "/opt/aiqa/server.new"
           strip_components: 1
-          rm: true
+
+      - name: Verify deployment and swap files
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ env.DEPLOY_HOST }}
+          username: ${{ env.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          script: |
+            # Verify new deployment files exist
+            if [ ! -f /opt/aiqa/server.new/dist/index.js ]; then
+              echo "ERROR: New deployment missing dist/index.js!"
+              sudo rm -rf /opt/aiqa/server.new
+              exit 1
+            fi
+            
+            # Stop service before swapping files (minimal downtime)
+            sudo systemctl stop aiqa-server || true
+            
+            # Backup old files (for rollback)
+            if [ -d /opt/aiqa/server/dist ]; then
+              sudo mv /opt/aiqa/server/dist /opt/aiqa/server/dist.old || true
+            fi
+            if [ -f /opt/aiqa/server/package.json ]; then
+              sudo mv /opt/aiqa/server/package.json /opt/aiqa/server/package.json.old || true
+            fi
+            if [ -f /opt/aiqa/server/pnpm-lock.yaml ]; then
+              sudo mv /opt/aiqa/server/pnpm-lock.yaml /opt/aiqa/server/pnpm-lock.yaml.old || true
+            fi
+            
+            # Move new files into place
+            sudo mv /opt/aiqa/server.new/dist /opt/aiqa/server/dist
+            sudo mv /opt/aiqa/server.new/package.json /opt/aiqa/server/package.json
+            sudo mv /opt/aiqa/server.new/pnpm-lock.yaml /opt/aiqa/server/pnpm-lock.yaml
+            
+            # Clean up temp directory
+            sudo rmdir /opt/aiqa/server.new || sudo rm -rf /opt/aiqa/server.new
+            
+            # Clean up old backup (keep last deployment for rollback)
+            sudo rm -rf /opt/aiqa/server/dist.old.old || true
+            if [ -d /opt/aiqa/server/dist.old ]; then
+              sudo mv /opt/aiqa/server/dist.old /opt/aiqa/server/dist.old.old || true
+            fi
+            sudo rm -f /opt/aiqa/server/package.json.old /opt/aiqa/server/pnpm-lock.yaml.old || true
 
       - name: Create .env file on remote server
         uses: appleboy/ssh-action@v1.0.3
