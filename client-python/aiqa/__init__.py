@@ -40,7 +40,7 @@ from .tracing import (
 from .client import get_aiqa_client
 from .experiment_runner import ExperimentRunner
 
-__version__ = "0.3.4"
+__version__ = "0.3.5"
 
 __all__ = [
     "WithTracing",
