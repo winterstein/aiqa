@@ -139,10 +139,10 @@ To link traces across different services or agents, you can extract and propagat
 #### Getting Current Trace ID
 
 ```python
-from aiqa import get_trace_id, get_span_id
+from aiqa import get_active_trace_id, get_span_id
 
 # Get the current trace ID and span ID
-trace_id = get_trace_id()  # Returns hex string (32 chars) or None
+trace_id = get_active_trace_id()  # Returns hex string (32 chars) or None
 span_id = get_span_id()    # Returns hex string (16 chars) or None
 
 # Pass these to another service (e.g., in HTTP headers, message queue, etc.)

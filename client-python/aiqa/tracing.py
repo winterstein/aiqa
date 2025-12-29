@@ -55,7 +55,7 @@ async def shutdown_tracing() -> None:
 __all__ = [
     "get_provider", "get_exporter", "flush_tracing", "shutdown_tracing", "WithTracing",
     "set_span_attribute", "set_span_name", "get_active_span",
-    "get_trace_id", "get_span_id", "create_span_from_trace_id", "inject_trace_context", "extract_trace_context",
+    "get_active_trace_id", "get_span_id", "create_span_from_trace_id", "inject_trace_context", "extract_trace_context",
     "set_conversation_id", "set_component_tag", "set_token_usage", "set_provider_and_model", "get_span", "submit_feedback"
 ]
 
@@ -968,7 +968,7 @@ def get_exporter() -> Optional[AIQASpanExporter]:
     return client.get("exporter")
 
 
-def get_trace_id() -> Optional[str]:
+def get_active_trace_id() -> Optional[str]:
     """
     Get the current trace ID as a hexadecimal string (32 characters).
     
@@ -976,9 +976,10 @@ def get_trace_id() -> Optional[str]:
         The trace ID as a hex string, or None if no active span exists.
     
     Example:
-        trace_id = get_trace_id()
+        trace_id = get_active_trace_id()
         # Pass trace_id to another service/agent
         # e.g., include in HTTP headers, message queue metadata, etc.
+        # Within a single thread, OpenTelemetry normally does this for you.
     """
     span = trace.get_current_span()
     if span and span.get_span_context().is_valid:
@@ -1023,7 +1024,7 @@ def create_span_from_trace_id(
     
     Example:
         # In service A: get trace ID
-        trace_id = get_trace_id()
+        trace_id = get_active_trace_id()
         span_id = get_span_id()
         
         # Send to service B (e.g., via HTTP, message queue, etc.)
