@@ -51,7 +51,10 @@ export class AIQASpanExporter implements SpanExporter {
   private serverUrl: string;
   private apiKey: string;
   private flushIntervalMs: number;
+  private maxBatchSizeBytes: number = 5 * 1024 * 1024; // 5MB default
+  private maxBufferSpans: number = 10000; // Maximum spans to buffer (prevents unbounded growth)
   private buffer: SerializableSpan[] = [];
+  private bufferSpanKeys: Set<string> = new Set(); // Track (traceId, spanId) tuples to prevent duplicates
   private flushTimer?: NodeJS.Timeout;
   private flushLock: Promise<void> = Promise.resolve();
   private shutdownRequested: boolean = false;
@@ -81,11 +84,44 @@ export class AIQASpanExporter implements SpanExporter {
   }
 
   /**
-   * Add spans to the buffer in a thread-safe manner
+   * Add spans to the buffer in a thread-safe manner.
+   * Deduplicates spans based on (traceId, spanId) to prevent repeated exports.
+   * Drops spans if buffer exceeds maxBufferSpans to prevent unbounded memory growth.
    */
   private addToBuffer(spans: ReadableSpan[]): void {
-    const serializedSpans = spans.map(span => this.serializeSpan(span));
+    let duplicatesCount = 0;
+    let droppedCount = 0;
+    const serializedSpans: SerializableSpan[] = [];
+    
+    for (const span of spans) {
+      // Check if buffer is full (prevent unbounded growth)
+      if (this.buffer.length >= this.maxBufferSpans) {
+        droppedCount++;
+        continue;
+      }
+      
+      const serialized = this.serializeSpan(span);
+      const spanKey = `${serialized.traceId}:${serialized.spanId}`;
+      
+      if (!this.bufferSpanKeys.has(spanKey)) {
+        serializedSpans.push(serialized);
+        this.bufferSpanKeys.add(spanKey);
+      } else {
+        duplicatesCount++;
+      }
+    }
+    
     this.buffer.push(...serializedSpans);
+    
+    if (droppedCount > 0) {
+      console.warn(
+        `AIQA: WARNING: Buffer full (${this.buffer.length} spans), dropped ${droppedCount} span(s). ` +
+        `Consider increasing maxBufferSpans or fixing server connectivity.`
+      );
+    }
+    if (duplicatesCount > 0) {
+      console.debug(`AIQA: export() added ${serializedSpans.length} span(s) to buffer, skipped ${duplicatesCount} duplicate(s). Total buffered: ${this.buffer.length}`);
+    }
   }
 
   /**
@@ -233,6 +269,16 @@ export class AIQASpanExporter implements SpanExporter {
   }
 
   /**
+   * Remove span keys from tracking set. Called after successful send to free memory.
+   */
+  private removeSpanKeysFromTracking(spans: SerializableSpan[]): void {
+    for (const span of spans) {
+      const spanKey = `${span.traceId}:${span.spanId}`;
+      this.bufferSpanKeys.delete(spanKey);
+    }
+  }
+
+  /**
    * Flush buffered spans to the server. Thread-safe: ensures only one flush operation runs at a time.
    */
   async flush(): Promise<void> {
@@ -248,6 +294,8 @@ export class AIQASpanExporter implements SpanExporter {
     try {
       // Get current buffer and clear it atomically
       const spansToFlush = this.buffer.splice(0);
+      // Note: Do NOT clear bufferSpanKeys here - only clear after successful send
+      // to avoid unnecessary clearing/rebuilding on failures
 
       if (spansToFlush.length === 0) {
         return;
@@ -256,10 +304,51 @@ export class AIQASpanExporter implements SpanExporter {
       // Skip sending if server URL is not configured
       if (!this.serverUrl) {
         console.warn(`AIQA: Skipping flush: AIQA_SERVER_URL is not set. ${spansToFlush.length} span(s) will not be sent.`);
+        // Clear keys for spans that won't be sent
+        this.removeSpanKeysFromTracking(spansToFlush);
         return;
       }
 
-      await this.sendSpans(spansToFlush);
+      // Split into batches if needed
+      const batches = this.splitIntoBatches(spansToFlush);
+      if (batches.length > 1) {
+        console.log(`AIQA: flush() splitting ${spansToFlush.length} spans into ${batches.length} batches`);
+      }
+
+      // Track successfully sent spans to clear their keys
+      const successfullySentSpans: SerializableSpan[] = [];
+      const errors: Array<{ batch: number; error: string }> = [];
+
+      // Send each batch
+      for (let i = 0; i < batches.length; i++) {
+        try {
+          await this.sendSpans(batches[i]);
+          // Track successfully sent spans
+          successfullySentSpans.push(...batches[i]);
+        } catch (error: any) {
+          const errorMsg = `batch ${i + 1}/${batches.length}: ${error.message}`;
+          console.error(`AIQA: Error sending ${errorMsg}`);
+          errors.push({ batch: i + 1, error: errorMsg });
+          // Put remaining batches back in buffer for retry
+          if (i + 1 < batches.length) {
+            for (const remainingBatch of batches.slice(i + 1)) {
+              this.buffer.push(...remainingBatch);
+              // Keys are already in bufferSpanKeys, no need to re-add
+            }
+          }
+          // Continue with other batches even if one fails
+        }
+      }
+
+      // Clear keys only for successfully sent spans
+      if (successfullySentSpans.length > 0) {
+        this.removeSpanKeysFromTracking(successfullySentSpans);
+      }
+
+      if (errors.length > 0) {
+        const errorSummary = errors.map(e => e.error).join('; ');
+        throw new Error(`Failed to send some spans: ${errorSummary}`);
+      }
     } catch (error: any) {
       console.error('AIQA: Error flushing spans to server:', error.message);
       // Don't throw in auto-flush to avoid crashing the process
@@ -272,6 +361,63 @@ export class AIQASpanExporter implements SpanExporter {
   }
 
   /**
+   * Split spans into batches based on maxBatchSizeBytes.
+   * Each batch will be as large as possible without exceeding the limit.
+   * If a single span exceeds the limit, it will be sent in its own batch with a warning.
+   */
+  private splitIntoBatches(spans: SerializableSpan[]): SerializableSpan[][] {
+    if (spans.length === 0) {
+      return [];
+    }
+
+    const batches: SerializableSpan[][] = [];
+    let currentBatch: SerializableSpan[] = [];
+    let currentBatchSize = 0;
+
+    for (const span of spans) {
+      // Estimate size of this span when serialized
+      const spanJSON = JSON.stringify(span);
+      const spanSize = new Blob([spanJSON]).size; // Use Blob to get accurate byte size
+
+      // Check if this single span exceeds the limit
+      if (spanSize > this.maxBatchSizeBytes) {
+        // If we have a current batch, save it first
+        if (currentBatch.length > 0) {
+          batches.push(currentBatch);
+          currentBatch = [];
+          currentBatchSize = 0;
+        }
+
+        // Log warning about oversized span
+        console.warn(
+          `AIQA: Span '${span.name}' (traceId=${span.traceId}) exceeds maxBatchSizeBytes ` +
+          `(${spanSize} bytes > ${this.maxBatchSizeBytes} bytes). Will attempt to send it anyway.`
+        );
+        // Still create a batch with just this span - we'll try to send it
+        batches.push([span]);
+        continue;
+      }
+
+      // If adding this span would exceed the limit, start a new batch
+      if (currentBatch.length > 0 && currentBatchSize + spanSize > this.maxBatchSizeBytes) {
+        batches.push(currentBatch);
+        currentBatch = [];
+        currentBatchSize = 0;
+      }
+
+      currentBatch.push(span);
+      currentBatchSize += spanSize;
+    }
+
+    // Add the last batch if it has any spans
+    if (currentBatch.length > 0) {
+      batches.push(currentBatch);
+    }
+
+    return batches;
+  }
+
+  /**
    * Send spans to the server API
    */
   private async sendSpans(spans: SerializableSpan[]): Promise<void> {
@@ -279,7 +425,6 @@ export class AIQASpanExporter implements SpanExporter {
       throw new Error('AIQA_SERVER_URL is not set. Cannot send spans to server.');
     }
 
-	console.log('AIQA: Sending spans to server:', this.serverUrl, spans, this.apiKey);
     const response = await fetch(`${this.serverUrl}/span`, {
       method: 'POST',
       headers: {

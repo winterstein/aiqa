@@ -27,9 +27,10 @@ except ImportError:
         # Set to None so we can check later
         TraceIdRatioBased = None
 
-from .aiqa_exporter import AIQASpanExporter
-
+# Define constant before importing AIQASpanExporter to avoid circular import issues
 AIQA_TRACER_NAME = "aiqa-tracer"
+
+from .aiqa_exporter import AIQASpanExporter
 
 client = {
     "provider": None,

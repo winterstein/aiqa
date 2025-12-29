@@ -381,10 +381,21 @@ export function setSpanAttribute(attributeName: string, attributeValue: any) {
  */
 function isAttributeSet(span: any, attributeName: string): boolean {
 	try {
+		// Check if span is recording first
+		if (!span || !span.isRecording || !span.isRecording()) {
+			return false;
+		}
+		
 		// Try to access span attributes if available
 		if (span.attributes) {
 			return attributeName in span.attributes;
 		}
+		
+		// Try private _attributes (common in OpenTelemetry SDK)
+		if (span._attributes) {
+			return attributeName in span._attributes;
+		}
+		
 		// Fallback: check if span has a way to get attributes
 		// OpenTelemetry spans don't expose a direct getter, so we return false
 		// to allow setting (conservative approach)

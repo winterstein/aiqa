@@ -69,7 +69,10 @@ type AIQAExporter struct {
 	serverURL         string
 	apiKey            string
 	flushInterval     time.Duration
+	maxBatchSizeBytes int
+	maxBufferSpans    int // Maximum number of spans to buffer (prevents unbounded growth)
 	buffer            []SerializableSpan
+	bufferSpanKeys    map[string]bool // Track (traceId, spanId) tuples to prevent duplicates
 	bufferMutex       sync.Mutex
 	flushMutex        sync.Mutex
 	shutdownRequested bool
@@ -90,11 +93,14 @@ func NewAIQAExporter(serverURL, apiKey string, flushIntervalSeconds int) *AIQAEx
 	serverURL = strings.TrimSuffix(serverURL, "/")
 	
 	exporter := &AIQAExporter{
-		serverURL:     serverURL,
-		apiKey:        apiKey,
-		flushInterval: time.Duration(flushIntervalSeconds) * time.Second,
-		buffer:        make([]SerializableSpan, 0),
-		client:        &http.Client{Timeout: 30 * time.Second},
+		serverURL:         serverURL,
+		apiKey:            apiKey,
+		flushInterval:     time.Duration(flushIntervalSeconds) * time.Second,
+		maxBatchSizeBytes: 5 * 1024 * 1024, // 5MB default
+		maxBufferSpans:    10000,           // Maximum spans to buffer (prevents unbounded growth)
+		buffer:            make([]SerializableSpan, 0),
+		bufferSpanKeys:    make(map[string]bool),
+		client:            &http.Client{Timeout: 30 * time.Second},
 	}
 	
 	exporter.startAutoFlush()
@@ -113,13 +119,39 @@ func (e *AIQAExporter) ExportSpans(ctx context.Context, spans []trace.ReadOnlySp
 }
 
 // addToBuffer adds spans to the buffer in a thread-safe manner
+// Deduplicates spans based on (traceId, spanId) to prevent repeated exports.
+// Drops spans if buffer exceeds maxBufferSpans to prevent unbounded memory growth.
 func (e *AIQAExporter) addToBuffer(spans []trace.ReadOnlySpan) {
 	e.bufferMutex.Lock()
 	defer e.bufferMutex.Unlock()
 	
+	duplicatesCount := 0
+	droppedCount := 0
+	
 	for _, span := range spans {
+		// Check if buffer is full (prevent unbounded growth)
+		if len(e.buffer) >= e.maxBufferSpans {
+			droppedCount++
+			continue
+		}
+		
 		serialized := e.serializeSpan(span)
-		e.buffer = append(e.buffer, serialized)
+		spanKey := serialized.TraceID + ":" + serialized.SpanID
+		if !e.bufferSpanKeys[spanKey] {
+			e.buffer = append(e.buffer, serialized)
+			e.bufferSpanKeys[spanKey] = true
+		} else {
+			duplicatesCount++
+		}
+	}
+	
+	if droppedCount > 0 {
+		fmt.Printf("AIQA: WARNING: Buffer full (%d spans), dropped %d span(s). Consider increasing maxBufferSpans or fixing server connectivity.\n",
+			len(e.buffer), droppedCount)
+	}
+	if duplicatesCount > 0 {
+		fmt.Printf("AIQA: export() added %d span(s) to buffer, skipped %d duplicate(s). Total buffered: %d\n",
+			len(spans)-duplicatesCount-droppedCount, duplicatesCount, len(e.buffer))
 	}
 }
 
@@ -217,6 +249,18 @@ func (e *AIQAExporter) serializeSpan(span trace.ReadOnlySpan) SerializableSpan {
 	}
 }
 
+// removeSpanKeysFromTracking removes span keys from tracking set (thread-safe).
+// Called after successful send to free memory.
+func (e *AIQAExporter) removeSpanKeysFromTracking(spans []SerializableSpan) {
+	e.bufferMutex.Lock()
+	defer e.bufferMutex.Unlock()
+	
+	for _, span := range spans {
+		spanKey := span.TraceID + ":" + span.SpanID
+		delete(e.bufferSpanKeys, spanKey)
+	}
+}
+
 // Flush flushes buffered spans to the server. Thread-safe.
 func (e *AIQAExporter) Flush(ctx context.Context) error {
 	e.flushMutex.Lock()
@@ -226,6 +270,8 @@ func (e *AIQAExporter) Flush(ctx context.Context) error {
 	spansToFlush := make([]SerializableSpan, len(e.buffer))
 	copy(spansToFlush, e.buffer)
 	e.buffer = e.buffer[:0]
+	// Note: Do NOT clear bufferSpanKeys here - only clear after successful send
+	// to avoid unnecessary clearing/rebuilding on failures
 	e.bufferMutex.Unlock()
 	
 	if len(spansToFlush) == 0 {
@@ -234,10 +280,107 @@ func (e *AIQAExporter) Flush(ctx context.Context) error {
 	
 	if e.serverURL == "" {
 		fmt.Printf("AIQA: Skipping flush: AIQA_SERVER_URL is not set. %d span(s) will not be sent.\n", len(spansToFlush))
+		// Clear keys for spans that won't be sent
+		e.removeSpanKeysFromTracking(spansToFlush)
 		return nil
 	}
 	
-	return e.sendSpans(ctx, spansToFlush)
+	// Split into batches if needed
+	batches := e.splitIntoBatches(spansToFlush)
+	if len(batches) > 1 {
+		fmt.Printf("AIQA: flush() splitting %d spans into %d batches\n", len(spansToFlush), len(batches))
+	}
+	
+	// Track successfully sent spans to clear their keys
+	var successfullySentSpans []SerializableSpan
+	
+	// Send each batch
+	for i, batch := range batches {
+		if err := e.sendSpans(ctx, batch); err != nil {
+			// If one batch fails, continue with others but return error
+			fmt.Printf("AIQA: Error sending batch %d/%d: %v\n", i+1, len(batches), err)
+			// Put remaining batches back in buffer for retry
+			if i+1 < len(batches) {
+				e.bufferMutex.Lock()
+				for _, remainingBatch := range batches[i+1:] {
+					e.buffer = append(e.buffer, remainingBatch...)
+					// Keys are already in bufferSpanKeys, no need to re-add
+				}
+				e.bufferMutex.Unlock()
+			}
+			// Clear keys only for successfully sent spans
+			if len(successfullySentSpans) > 0 {
+				e.removeSpanKeysFromTracking(successfullySentSpans)
+			}
+			return err
+		}
+		// Track successfully sent spans
+		successfullySentSpans = append(successfullySentSpans, batch...)
+	}
+	
+	// Clear keys for all successfully sent spans
+	if len(successfullySentSpans) > 0 {
+		e.removeSpanKeysFromTracking(successfullySentSpans)
+	}
+	
+	return nil
+}
+
+// splitIntoBatches splits spans into batches based on maxBatchSizeBytes.
+// Each batch will be as large as possible without exceeding the limit.
+// If a single span exceeds the limit, it will be sent in its own batch with a warning.
+func (e *AIQAExporter) splitIntoBatches(spans []SerializableSpan) [][]SerializableSpan {
+	if len(spans) == 0 {
+		return nil
+	}
+	
+	var batches [][]SerializableSpan
+	var currentBatch []SerializableSpan
+	currentBatchSize := 0
+	
+	for _, span := range spans {
+		// Estimate size of this span when serialized
+		spanJSON, err := json.Marshal(span)
+		if err != nil {
+			// If marshaling fails, estimate based on a reasonable default
+			spanJSON = []byte("{}")
+		}
+		spanSize := len(spanJSON)
+		
+		// Check if this single span exceeds the limit
+		if spanSize > e.maxBatchSizeBytes {
+			// If we have a current batch, save it first
+			if len(currentBatch) > 0 {
+				batches = append(batches, currentBatch)
+				currentBatch = nil
+				currentBatchSize = 0
+			}
+			
+			// Log warning about oversized span
+			fmt.Printf("AIQA: Span '%s' (traceId=%s) exceeds maxBatchSizeBytes (%d bytes > %d bytes). Will attempt to send it anyway.\n",
+				span.Name, span.TraceID, spanSize, e.maxBatchSizeBytes)
+			// Still create a batch with just this span - we'll try to send it
+			batches = append(batches, []SerializableSpan{span})
+			continue
+		}
+		
+		// If adding this span would exceed the limit, start a new batch
+		if len(currentBatch) > 0 && currentBatchSize+spanSize > e.maxBatchSizeBytes {
+			batches = append(batches, currentBatch)
+			currentBatch = nil
+			currentBatchSize = 0
+		}
+		
+		currentBatch = append(currentBatch, span)
+		currentBatchSize += spanSize
+	}
+	
+	// Add the last batch if it has any spans
+	if len(currentBatch) > 0 {
+		batches = append(batches, currentBatch)
+	}
+	
+	return batches
 }
 
 // sendSpans sends spans to the server API

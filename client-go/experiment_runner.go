@@ -241,6 +241,7 @@ func (er *ExperimentRunner) CreateExperiment(ctx context.Context, experimentSetu
 		experimentSetup.SummaryResults = make(map[string]interface{})
 	}
 
+	fmt.Println("AIQA: Creating experiment")
 	jsonData, err := json.Marshal(experimentSetup)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal experiment: %w", err)
@@ -287,6 +288,8 @@ func (er *ExperimentRunner) ScoreAndStore(ctx context.Context, example Example, 
 		}
 	}
 
+	fmt.Printf("AIQA: Scoring and storing example: %s\n", example.Id)
+	fmt.Printf("AIQA: Scores: %v\n", scores)
 	requestBody := map[string]interface{}{
 		"output":  result,
 		"traceId": example.TraceId,
@@ -325,6 +328,7 @@ func (er *ExperimentRunner) ScoreAndStore(ctx context.Context, example Example, 
 		return nil, fmt.Errorf("failed to decode score result: %w", err)
 	}
 
+	fmt.Printf("AIQA: scoreAndStore response: %v\n", scoreResult)
 	return scoreResult, nil
 }
 
@@ -393,6 +397,10 @@ func (er *ExperimentRunner) RunExample(ctx context.Context, example Example, cal
 			}
 		}
 	}
+	if input == nil {
+		fmt.Printf("AIQA: Warning: Example has no input field or spans with input attribute: %v\n", example)
+		// Run engine anyway -- this could make sense if it's all about the parameters
+	}
 
 	var allScores []ScoreResult
 
@@ -405,6 +413,8 @@ func (er *ExperimentRunner) RunExample(ctx context.Context, example Example, cal
 		for k, v := range parameters {
 			parametersHere[k] = v
 		}
+
+		fmt.Printf("AIQA: Running with parameters: %v\n", parametersHere)
 
 		// Set env vars from parametersHere
 		for key, value := range parametersHere {
@@ -420,6 +430,8 @@ func (er *ExperimentRunner) RunExample(ctx context.Context, example Example, cal
 		}
 		duration := time.Since(start)
 
+		fmt.Printf("AIQA: Output: %v\n", output)
+
 		scores := make(map[string]float64)
 		if scoreThisOutput != nil {
 			scored, err := scoreThisOutput(output, example, parametersHere)
@@ -432,10 +444,12 @@ func (er *ExperimentRunner) RunExample(ctx context.Context, example Example, cal
 		}
 		scores["duration"] = float64(duration.Milliseconds())
 
+		fmt.Printf("AIQA: Call scoreAndStore ... for example: %s with scores: %v\n", example.Id, scores)
 		result, err := er.ScoreAndStore(ctx, example, output, scores)
 		if err != nil {
 			return nil, fmt.Errorf("failed to score and store: %w", err)
 		}
+		fmt.Printf("AIQA: scoreAndStore returned: %v\n", result)
 
 		allScores = append(allScores, result)
 	}
