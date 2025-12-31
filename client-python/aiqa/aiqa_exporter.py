@@ -9,6 +9,7 @@ import logging
 import threading
 import time
 import io
+import asyncio
 from typing import List, Dict, Any, Optional
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
@@ -32,6 +33,7 @@ class AIQASpanExporter(SpanExporter):
         flush_interval_seconds: float = 5.0,
         max_batch_size_bytes: int = 5 * 1024 * 1024,  # 5MB default
         max_buffer_spans: int = 10000,  # Maximum spans to buffer (prevents unbounded growth)
+        startup_delay_seconds: Optional[float] = None,
     ):
         """
         Initialize the AIQA span exporter.
@@ -41,12 +43,28 @@ class AIQASpanExporter(SpanExporter):
             api_key: API key for authentication (defaults to AIQA_API_KEY env var)
             flush_interval_seconds: How often to flush spans to the server
             max_batch_size_bytes: Maximum size of a single batch in bytes (default: 5mb)
+            max_buffer_spans: Maximum spans to buffer (prevents unbounded growth)
+            startup_delay_seconds: Delay before starting auto-flush (default: 10s, or AIQA_STARTUP_DELAY_SECONDS env var)
         """
         self._server_url = server_url
         self._api_key = api_key
         self.flush_interval_ms = flush_interval_seconds * 1000
         self.max_batch_size_bytes = max_batch_size_bytes
         self.max_buffer_spans = max_buffer_spans
+        
+        # Get startup delay from parameter or environment variable (default: 10s)
+        if startup_delay_seconds is None:
+            env_delay = os.getenv("AIQA_STARTUP_DELAY_SECONDS")
+            if env_delay:
+                try:
+                    startup_delay_seconds = float(env_delay)
+                except ValueError:
+                    logger.warning(f"Invalid AIQA_STARTUP_DELAY_SECONDS value '{env_delay}', using default 10.0")
+                    startup_delay_seconds = 10.0
+            else:
+                startup_delay_seconds = 10.0
+        self.startup_delay_seconds = startup_delay_seconds
+        
         self.buffer: List[Dict[str, Any]] = []
         self.buffer_span_keys: set = set()  # Track (traceId, spanId) tuples to prevent duplicates (Python 3.8 compatible)
         self.buffer_lock = threading.Lock()
@@ -56,7 +74,7 @@ class AIQASpanExporter(SpanExporter):
         
         logger.info(
             f"Initializing AIQASpanExporter: server_url={self.server_url or 'not set'}, "
-            f"flush_interval={flush_interval_seconds}s"
+            f"flush_interval={flush_interval_seconds}s, startup_delay={startup_delay_seconds}s"
         )
         self._start_auto_flush()
 
@@ -377,16 +395,38 @@ class AIQASpanExporter(SpanExporter):
                     raise
 
     def _start_auto_flush(self) -> None:
-        """Start the auto-flush timer."""
+        """Start the auto-flush timer with startup delay."""
         if self.shutdown_requested:
             logger.warning("_start_auto_flush() called but shutdown already requested")
             return
 
-        logger.info(f"Starting auto-flush thread with interval {self.flush_interval_ms / 1000.0}s")
+        logger.info(
+            f"Starting auto-flush thread with interval {self.flush_interval_ms / 1000.0}s, "
+            f"startup delay {self.startup_delay_seconds}s"
+        )
 
         def flush_worker():
             import asyncio
             logger.debug("Auto-flush worker thread started")
+            
+            # Wait for startup delay before beginning flush operations
+            # This gives the container/application time to stabilize, which helps avoid startup issues (seen with AWS ECS, Dec 2025).
+            if self.startup_delay_seconds > 0:
+                logger.info(f"Auto-flush waiting {self.startup_delay_seconds}s before first flush (startup delay)")
+                # Sleep in small increments to allow for early shutdown
+                sleep_interval = 0.5
+                remaining_delay = self.startup_delay_seconds
+                while remaining_delay > 0 and not self.shutdown_requested:
+                    sleep_time = min(sleep_interval, remaining_delay)
+                    time.sleep(sleep_time)
+                    remaining_delay -= sleep_time
+                
+                if self.shutdown_requested:
+                    logger.debug("Auto-flush startup delay interrupted by shutdown")
+                    return
+                
+                logger.info("Auto-flush startup delay complete, beginning flush operations")
+            
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             
@@ -439,8 +479,10 @@ class AIQASpanExporter(SpanExporter):
         else:
             logger.debug("_send_spans() no API key provided")
 
+        # Use timeout to prevent hanging on unreachable servers
+        timeout = aiohttp.ClientTimeout(total=30.0, connect=10.0)
         errors = []
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             for batch_idx, batch in enumerate(batches):
                 try:
                     logger.debug(f"_send_spans() sending batch {batch_idx + 1}/{len(batches)} with {len(batch)} spans to {url}")
@@ -458,6 +500,12 @@ class AIQASpanExporter(SpanExporter):
                             # Continue with other batches even if one fails
                             continue
                         logger.debug(f"_send_spans() batch {batch_idx + 1} successfully sent {len(batch)} spans")
+                except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                    # Network errors and timeouts - log but don't fail completely
+                    error_msg = f"Network error in batch {batch_idx + 1}: {type(e).__name__}: {e}"
+                    logger.warning(f"_send_spans() {error_msg} - will retry on next flush")
+                    errors.append((batch_idx + 1, error_msg))
+                    # Continue with other batches
                 except RuntimeError as e:
                     if self._is_interpreter_shutdown_error(e):
                         if self.shutdown_requested:
@@ -476,6 +524,7 @@ class AIQASpanExporter(SpanExporter):
                     # Continue with other batches
         
         # If any batches failed, raise an exception with details
+        # Spans will be restored to buffer for retry on next flush
         if errors:
             error_summary = "; ".join([f"batch {idx}: {msg}" for idx, msg in errors])
             raise Exception(f"Failed to send some spans: {error_summary}")
