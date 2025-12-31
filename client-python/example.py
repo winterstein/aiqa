@@ -13,7 +13,13 @@ load_dotenv()
 
 # Initialize client (must be called before using WithTracing)
 # This loads environment variables and initializes the tracing system
-get_aiqa_client()
+client = get_aiqa_client()
+
+# Example: Enable/disable tracing programmatically
+# If AIQA_SERVER_URL or AIQA_API_KEY are missing, tracing is automatically disabled
+# You can also control it manually:
+# client.set_enabled(False)  # Disable tracing
+# client.set_enabled(True)  # Enable tracing
 
 logging.basicConfig(level=logging.DEBUG)
 logging.getLogger("aiqa").setLevel(logging.DEBUG)

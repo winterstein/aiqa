@@ -30,6 +30,9 @@ export AIQA_SERVER_URL="http://localhost:3000"
 export AIQA_API_KEY="your-api-key"
 ```
 
+**Note:** If `AIQA_SERVER_URL` or `AIQA_API_KEY` are not set, tracing will be automatically disabled. You'll see one warning message at the start, and your application will continue to run without tracing.
+You can check if tracing is enabled via `get_aiqa_client().enabled`.
+
 ## Usage
 
 ### Basic Usage
@@ -103,6 +106,30 @@ async def main():
 
 asyncio.run(main())
 ```
+
+### Enabling/Disabling Tracing
+
+You can programmatically enable or disable tracing:
+
+```python
+from aiqa import get_aiqa_client
+
+client = get_aiqa_client()
+
+# Disable tracing (spans won't be created or exported)
+client.set_enabled(False)
+
+# Re-enable tracing
+client.set_enabled(True)
+
+# Check if tracing is enabled
+if client.enabled:
+    print("Tracing is enabled")
+```
+
+When tracing is disabled:
+- Spans are not created (functions execute normally without tracing overhead)
+- Spans are not exported to the server
 
 ### Setting Span Attributes and Names
 

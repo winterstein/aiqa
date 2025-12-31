@@ -71,6 +71,18 @@ class AIQASpanExporter(SpanExporter):
         if not spans:
             logger.debug("export() called with empty spans list")
             return SpanExportResult.SUCCESS
+        
+        # Check if AIQA tracing is enabled
+        try:
+            from .client import get_aiqa_client
+            client = get_aiqa_client()
+            if not client.enabled:
+                logger.debug(f"AIQA export() skipped: tracing is disabled")
+                return SpanExportResult.SUCCESS
+        except Exception:
+            # If we can't check enabled status, proceed (fail open)
+            pass
+        
         logger.debug(f"AIQA export() called with {len(spans)} spans")
         # Serialize and add to buffer, deduplicating by (traceId, spanId)
         with self.buffer_lock:

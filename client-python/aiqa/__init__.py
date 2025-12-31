@@ -37,10 +37,10 @@ from .tracing import (
     set_component_tag,
     get_span,
 )
-from .client import get_aiqa_client
+from .client import get_aiqa_client, set_enabled
 from .experiment_runner import ExperimentRunner
 
-__version__ = "0.3.5"
+__version__ = "0.3.6"
 
 __all__ = [
     "WithTracing",
@@ -52,6 +52,7 @@ __all__ = [
     "get_provider",
     "get_exporter",
     "get_aiqa_client",
+    "set_enabled",
     "ExperimentRunner",
     "get_active_trace_id",
     "get_span_id",

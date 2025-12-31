@@ -29,10 +29,10 @@ async def flush_tracing() -> None:
     This flushes both the BatchSpanProcessor and the exporter buffer.
     """
     client = get_aiqa_client()
-    if client.get("provider"):
-        client["provider"].force_flush()  # Synchronous method
-    if client.get("exporter"):    
-        await client["exporter"].flush()
+    if client.provider:
+        client.provider.force_flush()  # Synchronous method
+    if client.exporter:    
+        await client.exporter.flush()
 
 
 async def shutdown_tracing() -> None:
@@ -42,10 +42,10 @@ async def shutdown_tracing() -> None:
     """
     try:
         client = get_aiqa_client()
-        if client.get("provider"):
-            client["provider"].shutdown()  # Synchronous method
-        if client.get("exporter"):
-            client["exporter"].shutdown()  # Synchronous method
+        if client.provider:
+            client.provider.shutdown()  # Synchronous method
+        if client.exporter:
+            client.exporter.shutdown()  # Synchronous method
     except Exception as e:
         logger.error(f"Error shutting down tracing: {e}")
 
@@ -640,7 +640,10 @@ def WithTracing(
         def _execute_with_span_sync(executor: Callable[[], Any], input_data: Any) -> Any:
             """Execute sync function within span context, handling input/output and exceptions."""
             # Ensure tracer provider is initialized before creating spans
-            get_aiqa_client()
+            client = get_aiqa_client()
+            if not client.enabled:
+                return executor()
+            
             with tracer.start_as_current_span(fn_name) as span:
                 if not _setup_span(span, input_data):
                     return executor()
@@ -656,7 +659,10 @@ def WithTracing(
         async def _execute_with_span_async(executor: Callable[[], Any], input_data: Any) -> Any:
             """Execute async function within span context, handling input/output and exceptions."""
             # Ensure tracer provider is initialized before creating spans
-            get_aiqa_client()
+            client = get_aiqa_client()
+            if not client.enabled:
+                return await executor()
+            
             with tracer.start_as_current_span(fn_name) as span:
                 if not _setup_span(span, input_data):
                     return await executor()
@@ -675,7 +681,10 @@ def WithTracing(
         def _execute_generator_sync(executor: Callable[[], Any], input_data: Any) -> Any:
             """Execute sync generator function, returning a traced generator."""
             # Ensure tracer provider is initialized before creating spans
-            get_aiqa_client()
+            client = get_aiqa_client()
+            if not client.enabled:
+                return executor()
+            
             # Create span but don't use 'with' - span will be closed by TracedGenerator
             span = tracer.start_span(fn_name)
             token = trace.context_api.attach(trace.context_api.set_span_in_context(span))
@@ -698,7 +707,10 @@ def WithTracing(
         async def _execute_generator_async(executor: Callable[[], Any], input_data: Any) -> Any:
             """Execute async generator function, returning a traced async generator."""
             # Ensure tracer provider is initialized before creating spans
-            get_aiqa_client()
+            client = get_aiqa_client()
+            if not client.enabled:
+                return await executor()
+            
             # Create span but don't use 'with' - span will be closed by TracedAsyncGenerator
             span = tracer.start_span(fn_name)
             token = trace.context_api.attach(trace.context_api.set_span_in_context(span))
@@ -960,12 +972,12 @@ def set_component_tag(tag: str) -> None:
 def get_provider() -> Optional[TracerProvider]:
     """Get the tracer provider for advanced usage."""
     client = get_aiqa_client()
-    return client.get("provider")
+    return client.provider
 
 def get_exporter() -> Optional[AIQASpanExporter]:
     """Get the exporter for advanced usage."""
     client = get_aiqa_client()
-    return client.get("exporter")
+    return client.exporter
 
 
 def get_active_trace_id() -> Optional[str]:
