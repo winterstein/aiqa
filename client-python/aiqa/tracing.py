@@ -14,7 +14,8 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.trace import Status, StatusCode, SpanContext, TraceFlags
 from opentelemetry.propagate import inject, extract
 from .aiqa_exporter import AIQASpanExporter
-from .client import get_aiqa_client, AIQA_TRACER_NAME, get_component_tag, set_component_tag as _set_component_tag, get_aiqa_tracer
+from .client import get_aiqa_client, get_component_tag, set_component_tag as _set_component_tag, get_aiqa_tracer
+from .constants import AIQA_TRACER_NAME
 from .object_serialiser import serialize_for_span
 
 logger = logging.getLogger("AIQA")
@@ -25,6 +26,7 @@ async def flush_tracing() -> None:
     Flush all pending spans to the server.
     Flushes also happen automatically every few seconds. So you only need to call this function
     if you want to flush immediately, e.g. before exiting a process.
+    A common use is if you are tracing unit tests or experiment runs.
 
     This flushes both the BatchSpanProcessor and the exporter buffer.
     """
@@ -35,25 +37,10 @@ async def flush_tracing() -> None:
         await client.exporter.flush()
 
 
-async def shutdown_tracing() -> None:
-    """
-    Shutdown the tracer provider and exporter.
-    It is not necessary to call this function.
-    """
-    try:
-        client = get_aiqa_client()
-        if client.provider:
-            client.provider.shutdown()  # Synchronous method
-        if client.exporter:
-            client.exporter.shutdown()  # Synchronous method
-    except Exception as e:
-        logger.error(f"Error shutting down tracing: {e}")
-
-
 # Export provider and exporter accessors for advanced usage
 
 __all__ = [
-    "get_provider", "get_exporter", "flush_tracing", "shutdown_tracing", "WithTracing",
+    "flush_tracing", "WithTracing",
     "set_span_attribute", "set_span_name", "get_active_span",
     "get_active_trace_id", "get_span_id", "create_span_from_trace_id", "inject_trace_context", "extract_trace_context",
     "set_conversation_id", "set_component_tag", "set_token_usage", "set_provider_and_model", "get_span", "submit_feedback"
@@ -968,16 +955,6 @@ def set_component_tag(tag: str) -> None:
             pass
     """
     _set_component_tag(tag)
-
-def get_provider() -> Optional[TracerProvider]:
-    """Get the tracer provider for advanced usage."""
-    client = get_aiqa_client()
-    return client.provider
-
-def get_exporter() -> Optional[AIQASpanExporter]:
-    """Get the exporter for advanced usage."""
-    client = get_aiqa_client()
-    return client.exporter
 
 
 def get_active_trace_id() -> Optional[str]:

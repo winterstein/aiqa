@@ -2,17 +2,20 @@
 import os
 import logging
 from functools import lru_cache
-from typing import Optional
+from typing import Optional, TYPE_CHECKING, Any
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+if TYPE_CHECKING:
+    from .aiqa_exporter import AIQASpanExporter
 
 logger = logging.getLogger("AIQA")
 
 # Compatibility import for TraceIdRatioBased sampler
 # In older OpenTelemetry versions it was TraceIdRatioBasedSampler
 # In newer versions (>=1.24.0) it's TraceIdRatioBased
-TraceIdRatioBased = None
+TraceIdRatioBased: Optional[Any] = None
 try:
     from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
 except ImportError:
@@ -28,10 +31,7 @@ except ImportError:
         # Set to None so we can check later
         TraceIdRatioBased = None
 
-from .aiqa_exporter import AIQASpanExporter
-
-AIQA_TRACER_NAME = "aiqa-tracer"
-
+from .constants import AIQA_TRACER_NAME
 
 class AIQAClient:
     """
@@ -78,32 +78,38 @@ class AIQAClient:
     
     @enabled.setter
     def enabled(self, value: bool) -> None:
-        """Set the enabled state."""
-        self._enabled = value
-    
-    def set_enabled(self, enabled: bool) -> None:
-        """
-        Enable or disable AIQA tracing.
+        """Set the enabled state.
         
         When disabled:
         - Tracing does not create spans
         - Export does not send spans
-        
-        Args:
-            enabled: True to enable tracing, False to disable
         """
-        self._enabled = enabled
-        if enabled:
-            logger.info("AIQA tracing enabled")
-        else:
-            logger.info("AIQA tracing disabled")
+        logger.info(f"AIQA tracing {'enabled' if value else 'disabled'}")
+        self._enabled = value
     
-    def is_enabled(self) -> bool:
-        """Check if tracing is enabled."""
-        return self._enabled
+    def shutdown(self) -> None:
+        """
+        Shutdown the tracer provider and exporter.
+        It is not necessary to call this function. 
+        Use this to clean up resources at the end of all tracing.
+        
+        This will also set enabled=False to prevent further tracing attempts.
+        """
+        try:
+            logger.info("AIQA tracing shutting down")
+            # Disable tracing to prevent attempts to use shut-down system
+            self.enabled = False
+            if self._provider:
+                self._provider.shutdown()
+            if self._exporter:
+                self._exporter.shutdown()
+        except Exception as e:
+            logger.error(f"Error shutting down tracing: {e}")
+            # Still disable even if shutdown had errors
+            self.enabled = False
 
 
-# Global singleton instance (for backward compatibility with direct access)
+# Global singleton instance
 client: AIQAClient = AIQAClient()
 
 # Component tag to add to all spans (can be set via AIQA_COMPONENT_TAG env var or programmatically)
@@ -154,24 +160,19 @@ def get_aiqa_client() -> AIQAClient:
         logger.warning("AIQA tracing is disabled. Your application will continue to run without tracing.")
     return client
 
-def _init_tracing():
+def _init_tracing() -> None:
     """Initialize tracing system and load configuration from environment variables."""
     global client
     if client._initialized:
         return
     
     try:
-        # Check for required environment variables
         server_url = os.getenv("AIQA_SERVER_URL")
         api_key = os.getenv("AIQA_API_KEY")
         
         if not server_url or not api_key:
             client.enabled = False
-            missing_vars = []
-            if not server_url:
-                missing_vars.append("AIQA_SERVER_URL")
-            if not api_key:
-                missing_vars.append("AIQA_API_KEY")
+            missing_vars = [var for var, val in [("AIQA_SERVER_URL", server_url), ("AIQA_API_KEY", api_key)] if not val]
             logger.warning(
                 f"AIQA tracing is disabled: missing required environment variables: {', '.join(missing_vars)}"
             )
@@ -218,10 +219,12 @@ def _init_tracing():
         client._initialized = True  # Mark as initialized even on error to prevent retry loops
         raise
 
-def _attach_aiqa_processor(provider: TracerProvider):
+def _attach_aiqa_processor(provider: TracerProvider) -> None:
     """Attach AIQA span processor to the provider. Idempotent - safe to call multiple times."""
+    from .aiqa_exporter import AIQASpanExporter
+    
     try:
-        # Avoid double-adding if get_aiqa_client() is called multiple times
+        # Check if already attached
         for p in provider._active_span_processor._span_processors:
             if isinstance(getattr(p, "exporter", None), AIQASpanExporter):
                 logger.debug("AIQA span processor already attached, skipping")
@@ -241,44 +244,19 @@ def _attach_aiqa_processor(provider: TracerProvider):
         raise
 
 
-def set_enabled(enabled: bool) -> None:
-    """
-    Enable or disable AIQA tracing.
-    
-    When disabled:
-    - Tracing does not create spans
-    - Export does not send spans
-    
-    Args:
-        enabled: True to enable tracing, False to disable
-    
-    Example:
-        from aiqa import get_aiqa_client
-        
-        client = get_aiqa_client()
-        client.set_enabled(False)  # Disable tracing
-    """
-    client = get_aiqa_client()
-    client.set_enabled(enabled)
 
-
-def get_aiqa_tracer():
+def get_aiqa_tracer() -> trace.Tracer:
     """
     Get the AIQA tracer with version from __init__.py __version__.
-    This should be used instead of trace.get_tracer() to ensure version is set.
+    This should be used instead of trace.get_tracer() so that the version is set.
     """
     try:
         # Import here to avoid circular import
         from . import __version__
-        
         # Compatibility: version parameter may not be supported in older OpenTelemetry versions
-        try:
-            # Try with version parameter (newer OpenTelemetry versions)
-            return trace.get_tracer(AIQA_TRACER_NAME, version=__version__)
-        except TypeError:
-            # Fall back to without version parameter (older versions)
-            return trace.get_tracer(AIQA_TRACER_NAME)
+        # Try with version parameter (newer OpenTelemetry versions)
+        return trace.get_tracer(AIQA_TRACER_NAME, version=__version__)
     except Exception as e:
-        logger.error(f"Error getting AIQA tracer: {e}")
-        # Return a basic tracer as fallback to prevent crashes
+        # Log issue but still return a tracer
+        logger.info(f"Issue getting AIQA tracer with version: {e}, using fallback")
         return trace.get_tracer(AIQA_TRACER_NAME)

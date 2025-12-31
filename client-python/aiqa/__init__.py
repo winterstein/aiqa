@@ -22,12 +22,9 @@ Example:
 from .tracing import (
     WithTracing,
     flush_tracing,
-    shutdown_tracing,
     set_span_attribute,
     set_span_name,
     get_active_span,
-    get_provider,
-    get_exporter,
     get_active_trace_id,
     get_span_id,
     create_span_from_trace_id,
@@ -37,22 +34,18 @@ from .tracing import (
     set_component_tag,
     get_span,
 )
-from .client import get_aiqa_client, set_enabled
+from .client import get_aiqa_client
 from .experiment_runner import ExperimentRunner
 
-__version__ = "0.3.6"
+__version__ = "0.3.7"
 
 __all__ = [
     "WithTracing",
     "flush_tracing",
-    "shutdown_tracing",
     "set_span_attribute",
     "set_span_name",
     "get_active_span",
-    "get_provider",
-    "get_exporter",
     "get_aiqa_client",
-    "set_enabled",
     "ExperimentRunner",
     "get_active_trace_id",
     "get_span_id",

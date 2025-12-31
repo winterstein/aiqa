@@ -13,6 +13,9 @@ from typing import List, Dict, Any, Optional
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
+from .constants import AIQA_TRACER_NAME
+from . import __version__
+
 logger = logging.getLogger("AIQA")
 
 
@@ -28,6 +31,7 @@ class AIQASpanExporter(SpanExporter):
         api_key: Optional[str] = None,
         flush_interval_seconds: float = 5.0,
         max_batch_size_bytes: int = 5 * 1024 * 1024,  # 5MB default
+        max_buffer_spans: int = 10000,  # Maximum spans to buffer (prevents unbounded growth)
     ):
         """
         Initialize the AIQA span exporter.
@@ -42,6 +46,7 @@ class AIQASpanExporter(SpanExporter):
         self._api_key = api_key
         self.flush_interval_ms = flush_interval_seconds * 1000
         self.max_batch_size_bytes = max_batch_size_bytes
+        self.max_buffer_spans = max_buffer_spans
         self.buffer: List[Dict[str, Any]] = []
         self.buffer_span_keys: set = set()  # Track (traceId, spanId) tuples to prevent duplicates (Python 3.8 compatible)
         self.buffer_lock = threading.Lock()
@@ -88,7 +93,13 @@ class AIQASpanExporter(SpanExporter):
         with self.buffer_lock:
             serialized_spans = []
             duplicates_count = 0
+            dropped_count = 0
             for span in spans:
+                # Check if buffer is full (prevent unbounded growth)
+                if len(self.buffer) >= self.max_buffer_spans:
+                    dropped_count += 1
+                    continue
+                
                 serialized = self._serialize_span(span)
                 span_key = (serialized["traceId"], serialized["spanId"])
                 if span_key not in self.buffer_span_keys:
@@ -100,6 +111,12 @@ class AIQASpanExporter(SpanExporter):
             
             self.buffer.extend(serialized_spans)
             buffer_size = len(self.buffer)
+            
+            if dropped_count > 0:
+                logger.warning(
+                    f"WARNING: Buffer full ({buffer_size} spans), dropped {dropped_count} span(s). "
+                    f"Consider increasing max_buffer_spans or fixing server connectivity."
+                )
         
         if duplicates_count > 0:
             logger.debug(
@@ -172,10 +189,16 @@ class AIQASpanExporter(SpanExporter):
             "traceFlags": span_context.trace_flags,
             "duration": self._time_to_tuple(span.end_time - span.start_time) if span.end_time else None,
             "ended": span.end_time is not None,
-            "instrumentationLibrary": {
-                "name": self._get_instrumentation_name(),
-                "version": self._get_instrumentation_version(),
-            },
+            "instrumentationLibrary": self._get_instrumentation_library(span),
+        }
+
+    def _get_instrumentation_library(self, span: ReadableSpan) -> Dict[str, Any]:
+        """
+        Get instrumentation library information from the span: just use the package version.
+        """
+        return {
+            "name": AIQA_TRACER_NAME,
+            "version": __version__,
         }
 
     def _time_to_tuple(self, nanoseconds: int) -> tuple:
@@ -183,19 +206,6 @@ class AIQASpanExporter(SpanExporter):
         seconds = int(nanoseconds // 1_000_000_000)
         nanos = int(nanoseconds % 1_000_000_000)
         return (seconds, nanos)
-    
-    def _get_instrumentation_name(self) -> str:
-        """Get instrumentation library name - always 'aiqa-tracer'."""
-        from .client import AIQA_TRACER_NAME
-        return AIQA_TRACER_NAME
-    
-    def _get_instrumentation_version(self) -> Optional[str]:
-        """Get instrumentation library version from __version__."""
-        try:
-            from . import __version__
-            return __version__
-        except (ImportError, AttributeError):
-            return None
 
     def _build_request_headers(self) -> Dict[str, str]:
         """Build HTTP headers for span requests."""

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io"
-	"math"
 	"net/http"
 	"os"
 	"reflect"
@@ -19,10 +18,10 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var (
@@ -56,18 +55,18 @@ func (s *traceIDSampler) ShouldSample(params sdktrace.SamplingParameters) sdktra
 	if s.rate >= 1 {
 		return sdktrace.SamplingResult{Decision: sdktrace.RecordAndSample}
 	}
-	
+
 	// Use trace ID for deterministic sampling
 	traceID := params.TraceID
 	hash := fnv.New64a()
 	hash.Write(traceID[:])
 	hashValue := hash.Sum64()
-	
+
 	// Convert hash to a value in [0, 1)
 	// hashValue is already a uint64, so normalize it by dividing by max uint64 (2^64 - 1)
 	const maxUint64 = float64(^uint64(0))
 	sampleValue := float64(hashValue) / maxUint64
-	
+
 	if sampleValue < s.rate {
 		return sdktrace.SamplingResult{Decision: sdktrace.RecordAndSample}
 	}
@@ -80,8 +79,8 @@ func (s *traceIDSampler) Description() string {
 
 // TracingOptions contains options for tracing functions
 type TracingOptions struct {
-	Name        string
-	IgnoreInput []string
+	Name         string
+	IgnoreInput  []string
 	IgnoreOutput []string
 	FilterInput  func(interface{}) interface{}
 	FilterOutput func(interface{}) interface{}
@@ -98,7 +97,7 @@ func InitTracing(serverURL, apiKey string, samplingRateArg ...float64) error {
 	if apiKey == "" {
 		apiKey = os.Getenv("AIQA_API_KEY")
 	}
-	
+
 	// Set sampling rate
 	if len(samplingRateArg) > 0 {
 		samplingRate = samplingRateArg[0]
@@ -109,19 +108,19 @@ func InitTracing(serverURL, apiKey string, samplingRateArg ...float64) error {
 			}
 		}
 	}
-	
+
 	// Clamp sampling rate to [0, 1]
 	if samplingRate < 0 {
 		samplingRate = 0
 	} else if samplingRate > 1 {
 		samplingRate = 1
 	}
-	
+
 	exporter = NewAIQAExporter(serverURL, apiKey, 5)
-	
+
 	// Check if a TracerProvider is already set
 	existingProvider := otel.GetTracerProvider()
-	
+
 	// Try to cast to SDK TracerProvider to see if it's a real provider
 	if sdkProvider, ok := existingProvider.(*sdktrace.TracerProvider); ok {
 		// Real provider already exists, add our span processor to it
@@ -131,7 +130,7 @@ func InitTracing(serverURL, apiKey string, samplingRateArg ...float64) error {
 		tracer = otel.Tracer(tracerName)
 		return nil
 	}
-	
+
 	// No real provider exists, create a new one
 	res, err := resource.New(
 		context.Background(),
@@ -142,22 +141,22 @@ func InitTracing(serverURL, apiKey string, samplingRateArg ...float64) error {
 	if err != nil {
 		return fmt.Errorf("failed to create resource: %w", err)
 	}
-	
+
 	// Create a batch span processor with the exporter
 	bsp := sdktrace.NewBatchSpanProcessor(exporter)
-	
+
 	// Create custom sampler based on trace-id
 	sampler := &traceIDSampler{rate: samplingRate}
-	
+
 	tracerProvider = sdktrace.NewTracerProvider(
 		sdktrace.WithSpanProcessor(bsp),
 		sdktrace.WithResource(res),
 		sdktrace.WithSampler(sampler),
 	)
-	
+
 	otel.SetTracerProvider(tracerProvider)
 	tracer = otel.Tracer(tracerName)
-	
+
 	return nil
 }
 
@@ -195,14 +194,14 @@ func WithTracing(fn interface{}, options ...TracingOptions) interface{} {
 	if len(options) > 0 {
 		opt = options[0]
 	}
-	
+
 	fnValue := reflect.ValueOf(fn)
 	fnType := fnValue.Type()
-	
+
 	if fnType.Kind() != reflect.Func {
 		panic("WithTracing: argument must be a function")
 	}
-	
+
 	// Get function name
 	fnName := opt.Name
 	if fnName == "" {
@@ -211,13 +210,13 @@ func WithTracing(fn interface{}, options ...TracingOptions) interface{} {
 			fnName = fnName[idx+1:]
 		}
 	}
-	
+
 	// Check if already traced
 	if fnValue.Kind() == reflect.Func {
 		// Check for _isTraced field (not possible in Go, but we can track it differently)
 		// For now, we'll just wrap it
 	}
-	
+
 	// Determine if function is async (returns error or context)
 	isAsync := false
 	if fnType.NumOut() > 0 {
@@ -226,7 +225,7 @@ func WithTracing(fn interface{}, options ...TracingOptions) interface{} {
 			isAsync = true
 		}
 	}
-	
+
 	if isAsync {
 		return wrapAsyncFunction(fnValue, fnType, fnName, opt)
 	}
@@ -242,7 +241,7 @@ func wrapSyncFunction(fnValue reflect.Value, fnType reflect.Type, fnName string,
 				ctx = ctxVal.Interface().(context.Context)
 			}
 		}
-		
+
 		span := trace.SpanFromContext(ctx)
 		if !span.IsRecording() {
 			ctx, span = tracer.Start(ctx, fnName)
@@ -250,19 +249,19 @@ func wrapSyncFunction(fnValue reflect.Value, fnType reflect.Type, fnName string,
 			ctx, span = tracer.Start(ctx, fnName)
 		}
 		defer span.End()
-		
+
 		// Set component tag if configured
 		setComponentTagIfSet(span)
-		
+
 		// Prepare input
 		input := prepareInput(args, opt)
 		if input != nil {
 			span.SetAttributes(attribute.String("input", serializeValue(input)))
 		}
-		
+
 		// Execute function
 		results := fnValue.Call(args)
-		
+
 		// Handle results
 		if len(results) > 0 {
 			output := prepareOutput(results, opt)
@@ -273,7 +272,7 @@ func wrapSyncFunction(fnValue reflect.Value, fnType reflect.Type, fnName string,
 				extractAndSetProviderAndModel(span, output)
 				span.SetAttributes(attribute.String("output", serializeValue(output)))
 			}
-			
+
 			// Check for error
 			lastResult := results[len(results)-1]
 			if lastResult.Type().String() == "error" && !lastResult.IsNil() {
@@ -286,10 +285,10 @@ func wrapSyncFunction(fnValue reflect.Value, fnType reflect.Type, fnName string,
 		} else {
 			span.SetStatus(codes.Ok, "")
 		}
-		
+
 		return results
 	})
-	
+
 	return wrapper.Interface()
 }
 
@@ -302,22 +301,22 @@ func wrapAsyncFunction(fnValue reflect.Value, fnType reflect.Type, fnName string
 				ctx = ctxVal.Interface().(context.Context)
 			}
 		}
-		
+
 		ctx, span := tracer.Start(ctx, fnName)
 		defer span.End()
-		
+
 		// Set component tag if configured
 		setComponentTagIfSet(span)
-		
+
 		// Prepare input
 		input := prepareInput(args, opt)
 		if input != nil {
 			span.SetAttributes(attribute.String("input", serializeValue(input)))
 		}
-		
+
 		// Execute function
 		results := fnValue.Call(args)
-		
+
 		// Handle results
 		if len(results) > 0 {
 			output := prepareOutput(results, opt)
@@ -328,7 +327,7 @@ func wrapAsyncFunction(fnValue reflect.Value, fnType reflect.Type, fnName string
 				extractAndSetProviderAndModel(span, output)
 				span.SetAttributes(attribute.String("output", serializeValue(output)))
 			}
-			
+
 			// Check for error (last return value)
 			lastResult := results[len(results)-1]
 			if lastResult.Type().String() == "error" {
@@ -341,10 +340,10 @@ func wrapAsyncFunction(fnValue reflect.Value, fnType reflect.Type, fnName string
 				}
 			}
 		}
-		
+
 		return results
 	})
-	
+
 	return wrapper.Interface()
 }
 
@@ -353,7 +352,7 @@ func prepareInput(args []reflect.Value, opt TracingOptions) interface{} {
 	if len(args) == 0 {
 		return nil
 	}
-	
+
 	// Filter out context if present
 	filteredArgs := make([]reflect.Value, 0, len(args))
 	for _, arg := range args {
@@ -361,11 +360,11 @@ func prepareInput(args []reflect.Value, opt TracingOptions) interface{} {
 			filteredArgs = append(filteredArgs, arg)
 		}
 	}
-	
+
 	if len(filteredArgs) == 0 {
 		return nil
 	}
-	
+
 	if len(filteredArgs) == 1 {
 		result := filteredArgs[0].Interface()
 		if opt.FilterInput != nil {
@@ -373,18 +372,18 @@ func prepareInput(args []reflect.Value, opt TracingOptions) interface{} {
 		}
 		return result
 	}
-	
+
 	// Multiple args - combine into map
 	result := make(map[string]interface{})
 	for i, arg := range filteredArgs {
 		key := fmt.Sprintf("arg%d", i)
 		result[key] = arg.Interface()
 	}
-	
+
 	if opt.FilterInput != nil {
 		result = opt.FilterInput(result).(map[string]interface{})
 	}
-	
+
 	return result
 }
 
@@ -393,7 +392,7 @@ func prepareOutput(results []reflect.Value, opt TracingOptions) interface{} {
 	if len(results) == 0 {
 		return nil
 	}
-	
+
 	// Filter out error if present
 	filteredResults := make([]reflect.Value, 0, len(results))
 	for _, result := range results {
@@ -401,11 +400,11 @@ func prepareOutput(results []reflect.Value, opt TracingOptions) interface{} {
 			filteredResults = append(filteredResults, result)
 		}
 	}
-	
+
 	if len(filteredResults) == 0 {
 		return nil
 	}
-	
+
 	if len(filteredResults) == 1 {
 		result := filteredResults[0].Interface()
 		if opt.FilterOutput != nil {
@@ -413,18 +412,18 @@ func prepareOutput(results []reflect.Value, opt TracingOptions) interface{} {
 		}
 		return result
 	}
-	
+
 	// Multiple results - combine into map
 	result := make(map[string]interface{})
 	for i, res := range filteredResults {
 		key := fmt.Sprintf("result%d", i)
 		result[key] = res.Interface()
 	}
-	
+
 	if opt.FilterOutput != nil {
 		result = opt.FilterOutput(result).(map[string]interface{})
 	}
-	
+
 	return result
 }
 
@@ -479,7 +478,7 @@ func applyDataFilters(key string, value interface{}) interface{} {
 	if value == nil {
 		return value
 	}
-	
+
 	// Check if value is falsy (empty string, zero, false)
 	switch v := value.(type) {
 	case string:
@@ -503,25 +502,25 @@ func applyDataFilters(key string, value interface{}) interface{} {
 			return value
 		}
 	}
-	
+
 	enabledFilters := getEnabledFilters()
 	keyLower := strings.ToLower(key)
-	
+
 	// RemovePasswords filter: if key contains "password", replace value with "****"
 	if enabledFilters["RemovePasswords"] && strings.Contains(keyLower, "password") {
 		return "****"
 	}
-	
+
 	// RemoveJWT filter: if value looks like a JWT token, replace with "****"
 	if enabledFilters["RemoveJWT"] && isJWTToken(value) {
 		return "****"
 	}
-	
+
 	// RemoveAuthHeaders filter: if key is "authorization" (case-insensitive), replace value with "****"
 	if enabledFilters["RemoveAuthHeaders"] && keyLower == "authorization" {
 		return "****"
 	}
-	
+
 	// RemoveAPIKeys filter: if key contains API key patterns or value looks like an API key
 	if enabledFilters["RemoveAPIKeys"] {
 		// Check key patterns
@@ -536,7 +535,7 @@ func applyDataFilters(key string, value interface{}) interface{} {
 			return "****"
 		}
 	}
-	
+
 	return value
 }
 
@@ -545,7 +544,7 @@ func filterDataRecursive(data interface{}) interface{} {
 	if data == nil {
 		return data
 	}
-	
+
 	switch v := data.(type) {
 	case map[string]interface{}:
 		result := make(map[string]interface{})
@@ -579,7 +578,7 @@ func filterDataRecursive(data interface{}) interface{} {
 func serializeValue(value interface{}) string {
 	// Apply data filters before serialization
 	filteredValue := filterDataRecursive(value)
-	
+
 	// Try JSON serialization first
 	jsonBytes, err := json.Marshal(filteredValue)
 	if err != nil {
@@ -612,7 +611,12 @@ func isAttributeSet(span trace.Span, attributeName string) bool {
 			// If anything goes wrong, assume not set (conservative approach)
 		}
 	}()
-	
+
+	// Check if span is recording first
+	if !span.IsRecording() {
+		return false
+	}
+
 	// Try to access span's internal attributes if available
 	// This is SDK-specific and may not work for all span implementations
 	if sdkSpan, ok := span.(interface{ Attributes() []attribute.KeyValue }); ok {
@@ -623,7 +627,18 @@ func isAttributeSet(span trace.Span, attributeName string) bool {
 			}
 		}
 	}
-	
+
+	// Try alternative method: check if span has a way to get attributes
+	// Some SDK implementations may store attributes differently
+	if attrSpan, ok := span.(interface{ GetAttributes() map[string]interface{} }); ok {
+		attrs := attrSpan.GetAttributes()
+		if attrs != nil {
+			if _, exists := attrs[attributeName]; exists {
+				return true
+			}
+		}
+	}
+
 	return false
 }
 
@@ -632,10 +647,10 @@ func isAttributeSet(span trace.Span, attributeName string) bool {
 // Only sets attributes that are not already set.
 //
 // This function detects token usage from OpenAI API response patterns:
-// - OpenAI Chat Completions API: The 'usage' object contains 'prompt_tokens', 'completion_tokens', and 'total_tokens'.
-//   See https://platform.openai.com/docs/api-reference/chat/object (usage field)
-// - OpenAI Completions API: The 'usage' object contains 'prompt_tokens', 'completion_tokens', and 'total_tokens'.
-//   See https://platform.openai.com/docs/api-reference/completions/object (usage field)
+//   - OpenAI Chat Completions API: The 'usage' object contains 'prompt_tokens', 'completion_tokens', and 'total_tokens'.
+//     See https://platform.openai.com/docs/api-reference/chat/object (usage field)
+//   - OpenAI Completions API: The 'usage' object contains 'prompt_tokens', 'completion_tokens', and 'total_tokens'.
+//     See https://platform.openai.com/docs/api-reference/completions/object (usage field)
 //
 // This function is safe against exceptions and will not derail tracing or program execution.
 func extractAndSetTokenUsage(span trace.Span, result interface{}) {
@@ -645,13 +660,13 @@ func extractAndSetTokenUsage(span trace.Span, result interface{}) {
 			// Silently ignore errors
 		}
 	}()
-	
+
 	if !span.IsRecording() {
 		return
 	}
-	
+
 	var usage map[string]interface{}
-	
+
 	// Check if result is a map with 'usage' key
 	if resultMap, ok := result.(map[string]interface{}); ok {
 		if usageVal, exists := resultMap["usage"]; exists {
@@ -674,7 +689,7 @@ func extractAndSetTokenUsage(span trace.Span, result interface{}) {
 			}
 		}
 	}
-	
+
 	// Check if result has a 'Usage' field (struct with Usage field, e.g., OpenAI response object)
 	if usage == nil {
 		resultVal := reflect.ValueOf(result)
@@ -704,7 +719,7 @@ func extractAndSetTokenUsage(span trace.Span, result interface{}) {
 			}
 		}
 	}
-	
+
 	// Extract token usage if found
 	if usage != nil {
 		// Get token values safely
@@ -721,7 +736,7 @@ func extractAndSetTokenUsage(span trace.Span, result interface{}) {
 			// Bedrock format (capitalized)
 			promptTokens = val
 		}
-		
+
 		if val, ok := usage["completion_tokens"]; ok {
 			completionTokens = val
 		} else if val, ok := usage["CompletionTokens"]; ok {
@@ -733,13 +748,13 @@ func extractAndSetTokenUsage(span trace.Span, result interface{}) {
 			// Bedrock format (capitalized)
 			completionTokens = val
 		}
-		
+
 		if val, ok := usage["total_tokens"]; ok {
 			totalTokens = val
 		} else if val, ok := usage["TotalTokens"]; ok {
 			totalTokens = val
 		}
-		
+
 		// Calculate total_tokens if not provided but we have input and output
 		if totalTokens == nil && promptTokens != nil && completionTokens != nil {
 			// Try to calculate total
@@ -762,7 +777,7 @@ func extractAndSetTokenUsage(span trace.Span, result interface{}) {
 				totalTokens = int(inputVal + outputVal)
 			}
 		}
-		
+
 		// Only set attributes that are not already set
 		if promptTokens != nil && !isAttributeSet(span, "gen_ai.usage.input_tokens") {
 			if tokens, ok := promptTokens.(int); ok {
@@ -773,7 +788,7 @@ func extractAndSetTokenUsage(span trace.Span, result interface{}) {
 				span.SetAttributes(attribute.Int("gen_ai.usage.input_tokens", int(tokens)))
 			}
 		}
-		
+
 		if completionTokens != nil && !isAttributeSet(span, "gen_ai.usage.output_tokens") {
 			if tokens, ok := completionTokens.(int); ok {
 				span.SetAttributes(attribute.Int("gen_ai.usage.output_tokens", tokens))
@@ -783,7 +798,7 @@ func extractAndSetTokenUsage(span trace.Span, result interface{}) {
 				span.SetAttributes(attribute.Int("gen_ai.usage.output_tokens", int(tokens)))
 			}
 		}
-		
+
 		if totalTokens != nil && !isAttributeSet(span, "gen_ai.usage.total_tokens") {
 			if tokens, ok := totalTokens.(int); ok {
 				span.SetAttributes(attribute.Int("gen_ai.usage.total_tokens", tokens))
@@ -801,10 +816,10 @@ func extractAndSetTokenUsage(span trace.Span, result interface{}) {
 // Only sets attributes that are not already set.
 //
 // This function detects model information from common API response patterns:
-// - OpenAI Chat Completions API: The 'model' field is at the top level of the response.
-//   See https://platform.openai.com/docs/api-reference/chat/object
-// - OpenAI Completions API: The 'model' field is at the top level of the response.
-//   See https://platform.openai.com/docs/api-reference/completions/object
+//   - OpenAI Chat Completions API: The 'model' field is at the top level of the response.
+//     See https://platform.openai.com/docs/api-reference/chat/object
+//   - OpenAI Completions API: The 'model' field is at the top level of the response.
+//     See https://platform.openai.com/docs/api-reference/completions/object
 //
 // This function is safe against exceptions and will not derail tracing or program execution.
 func extractAndSetProviderAndModel(span trace.Span, result interface{}) {
@@ -814,13 +829,13 @@ func extractAndSetProviderAndModel(span trace.Span, result interface{}) {
 			// Silently ignore errors
 		}
 	}()
-	
+
 	if !span.IsRecording() {
 		return
 	}
-	
+
 	var model, provider interface{}
-	
+
 	// Check if result is a map
 	if resultMap, ok := result.(map[string]interface{}); ok {
 		model = resultMap["model"]
@@ -837,7 +852,7 @@ func extractAndSetProviderAndModel(span trace.Span, result interface{}) {
 		if provider == nil {
 			provider = resultMap["providerName"]
 		}
-		
+
 		// Check for model in choices (OpenAI pattern)
 		if model == nil {
 			if choices, ok := resultMap["choices"].([]interface{}); ok && len(choices) > 0 {
@@ -850,7 +865,7 @@ func extractAndSetProviderAndModel(span trace.Span, result interface{}) {
 			}
 		}
 	}
-	
+
 	// Check if result has Model/Provider fields (struct, e.g., OpenAI response object)
 	if model == nil || provider == nil {
 		resultVal := reflect.ValueOf(result)
@@ -884,7 +899,7 @@ func extractAndSetProviderAndModel(span trace.Span, result interface{}) {
 			}
 		}
 	}
-	
+
 	// Set attributes if found and not already set
 	if model != nil && !isAttributeSet(span, "gen_ai.request.model") {
 		if modelStr, ok := model.(string); ok && modelStr != "" {
@@ -894,7 +909,7 @@ func extractAndSetProviderAndModel(span trace.Span, result interface{}) {
 			span.SetAttributes(attribute.String("gen_ai.request.model", fmt.Sprintf("%v", model)))
 		}
 	}
-	
+
 	if provider != nil && !isAttributeSet(span, "gen_ai.provider.name") {
 		if providerStr, ok := provider.(string); ok && providerStr != "" {
 			span.SetAttributes(attribute.String("gen_ai.provider.name", providerStr))
@@ -940,7 +955,7 @@ func SetTokenUsage(ctx context.Context, inputTokens *int, outputTokens *int, tot
 	if !span.IsRecording() {
 		return false
 	}
-	
+
 	setCount := 0
 	defer func() {
 		// Recover from any panics
@@ -948,7 +963,7 @@ func SetTokenUsage(ctx context.Context, inputTokens *int, outputTokens *int, tot
 			// Silently ignore errors
 		}
 	}()
-	
+
 	if inputTokens != nil {
 		span.SetAttributes(attribute.Int("gen_ai.usage.input_tokens", *inputTokens))
 		setCount++
@@ -961,7 +976,7 @@ func SetTokenUsage(ctx context.Context, inputTokens *int, outputTokens *int, tot
 		span.SetAttributes(attribute.Int("gen_ai.usage.total_tokens", *totalTokens))
 		setCount++
 	}
-	
+
 	return setCount > 0
 }
 
@@ -977,7 +992,7 @@ func SetProviderAndModel(ctx context.Context, provider *string, model *string) b
 	if !span.IsRecording() {
 		return false
 	}
-	
+
 	setCount := 0
 	defer func() {
 		// Recover from any panics
@@ -985,7 +1000,7 @@ func SetProviderAndModel(ctx context.Context, provider *string, model *string) b
 			// Silently ignore errors
 		}
 	}()
-	
+
 	if provider != nil && *provider != "" {
 		span.SetAttributes(attribute.String("gen_ai.provider.name", *provider))
 		setCount++
@@ -994,7 +1009,7 @@ func SetProviderAndModel(ctx context.Context, provider *string, model *string) b
 		span.SetAttributes(attribute.String("gen_ai.request.model", *model))
 		setCount++
 	}
-	
+
 	return setCount > 0
 }
 
@@ -1040,7 +1055,9 @@ func GetSpanId(ctx context.Context) string {
 //
 // traceId: The trace ID as a hexadecimal string (32 characters)
 // parentSpanId: Optional parent span ID as a hexadecimal string (16 characters).
-//   If provided, the new span will be a child of this span.
+//
+//	If provided, the new span will be a child of this span.
+//
 // spanName: Name for the new span (default: "continued_span")
 // Returns: A context with the new span and the span itself. Use it with defer span.End().
 func CreateSpanFromTraceId(ctx context.Context, traceId string, parentSpanId string, spanName string) (context.Context, trace.Span) {
@@ -1113,18 +1130,21 @@ type FeedbackOptions struct {
 //
 // spanId: The span ID as a hexadecimal string (16 characters) or client span ID
 // organisationId: Optional organisation ID. If empty, will try to get from AIQA_ORGANISATION_ID
-//   environment variable. The organisation is typically extracted from the API key during
-//   authentication, but the API requires it as a query parameter.
+//
+//	environment variable. The organisation is typically extracted from the API key during
+//	authentication, but the API requires it as a query parameter.
+//
 // Returns: The span data as a map, or nil if not found, and an error if the request failed
 //
 // Example:
-//   span, err := GetSpan(ctx, "abc123...", "")
-//   if err != nil {
-//       log.Fatal(err)
-//   }
-//   if span != nil {
-//       log.Printf("Found span: %v", span["name"])
-//   }
+//
+//	span, err := GetSpan(ctx, "abc123...", "")
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	if span != nil {
+//	    log.Printf("Found span: %v", span["name"])
+//	}
 func GetSpan(ctx context.Context, spanId string, organisationId string) (map[string]interface{}, error) {
 	serverURL := os.Getenv("AIQA_SERVER_URL")
 	apiKey := os.Getenv("AIQA_API_KEY")
@@ -1132,44 +1152,44 @@ func GetSpan(ctx context.Context, spanId string, organisationId string) (map[str
 	if orgID == "" {
 		orgID = os.Getenv("AIQA_ORGANISATION_ID")
 	}
-	
+
 	if serverURL == "" {
 		return nil, fmt.Errorf("AIQA_SERVER_URL is not set. Cannot retrieve span")
 	}
-	
+
 	if orgID == "" {
 		return nil, fmt.Errorf("Organisation ID is required. Provide it as parameter or set AIQA_ORGANISATION_ID environment variable")
 	}
-	
+
 	// Remove trailing slash
 	serverURL = strings.TrimSuffix(serverURL, "/")
-	
+
 	// Try both spanId and clientSpanId queries
 	queryFields := []string{"spanId", "clientSpanId"}
 	for _, queryField := range queryFields {
 		url := fmt.Sprintf("%s/span?q=%s:%s&organisation=%s&limit=1", serverURL, queryField, spanId, orgID)
-		
+
 		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create request: %w", err)
 		}
-		
+
 		req.Header.Set("Content-Type", "application/json")
 		if apiKey != "" {
 			req.Header.Set("Authorization", fmt.Sprintf("ApiKey %s", apiKey))
 		}
-		
+
 		client := &http.Client{Timeout: 30 * time.Second}
 		resp, err := client.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("failed to send request: %w", err)
 		}
 		defer resp.Body.Close()
-		
+
 		if resp.StatusCode == 200 {
 			var result struct {
 				Hits  []map[string]interface{} `json:"hits"`
-				Total int                     `json:"total"`
+				Total int                      `json:"total"`
 			}
 			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 				return nil, fmt.Errorf("failed to decode response: %w", err)
@@ -1185,7 +1205,7 @@ func GetSpan(ctx context.Context, spanId string, organisationId string) (map[str
 			return nil, fmt.Errorf("failed to get span: %d %s - %s", resp.StatusCode, resp.Status, string(body))
 		}
 	}
-	
+
 	return nil, nil
 }
 
@@ -1197,19 +1217,20 @@ func GetSpan(ctx context.Context, spanId string, organisationId string) (map[str
 // Returns: Error if feedback could not be submitted
 //
 // Example:
-//   // Submit positive feedback
-//   thumbsUp := true
-//   err := SubmitFeedback(ctx, "abc123...", FeedbackOptions{
-//       ThumbsUp: &thumbsUp,
-//       Comment:  "Great response!",
-//   })
 //
-//   // Submit negative feedback
-//   thumbsDown := false
-//   err := SubmitFeedback(ctx, "abc123...", FeedbackOptions{
-//       ThumbsUp: &thumbsDown,
-//       Comment:  "Incorrect answer",
-//   })
+//	// Submit positive feedback
+//	thumbsUp := true
+//	err := SubmitFeedback(ctx, "abc123...", FeedbackOptions{
+//	    ThumbsUp: &thumbsUp,
+//	    Comment:  "Great response!",
+//	})
+//
+//	// Submit negative feedback
+//	thumbsDown := false
+//	err := SubmitFeedback(ctx, "abc123...", FeedbackOptions{
+//	    ThumbsUp: &thumbsDown,
+//	    Comment:  "Incorrect answer",
+//	})
 func SubmitFeedback(ctx context.Context, traceId string, feedback FeedbackOptions) error {
 	if len(traceId) != 32 {
 		return fmt.Errorf("invalid trace ID: must be 32 hexadecimal characters")
@@ -1241,4 +1262,3 @@ func SubmitFeedback(ctx context.Context, traceId string, feedback FeedbackOption
 	// Flush to ensure it's sent immediately
 	return FlushSpans(ctx)
 }
-

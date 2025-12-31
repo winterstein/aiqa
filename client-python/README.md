@@ -97,12 +97,12 @@ asyncio.run(main())
 To ensure all spans are sent before process exit:
 
 ```python
-from aiqa import shutdown_tracing
+from aiqa import flush_tracing
 import asyncio
 
 async def main():
     # Your code here
-    await shutdown_tracing()
+    await flush_tracing()
 
 asyncio.run(main())
 ```
@@ -117,10 +117,10 @@ from aiqa import get_aiqa_client
 client = get_aiqa_client()
 
 # Disable tracing (spans won't be created or exported)
-client.set_enabled(False)
+client.enabled = False
 
 # Re-enable tracing
-client.set_enabled(True)
+client.enabled = True
 
 # Check if tracing is enabled
 if client.enabled:
