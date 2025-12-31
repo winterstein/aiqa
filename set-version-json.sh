@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Bump this version when you make a change to the codebase
-VERSION="0.3.9"
+VERSION="0.4.0"
 
 # Ideally this should be auto-run (fiddly with git hooks)
 
@@ -37,15 +37,15 @@ for FILE in ${FILES[@]}; do
     cp $VERSION_INFO_FILE $FILE
 done
 
-# Update Python __init__.py __version__
-PYTHON_INIT_FILE="client-python/aiqa/__init__.py"
-if [ -f "$PYTHON_INIT_FILE" ]; then
-    echo "Updating $PYTHON_INIT_FILE __version__"
-    # Use sed to update __version__ line, preserving the rest of the file
-    sed -i "s/^__version__ = \".*\"/__version__ = \"$VERSION\"/" "$PYTHON_INIT_FILE"
-    echo "Updated __version__ to $VERSION in $PYTHON_INIT_FILE"
+# Update Python constants.py VERSION
+PYTHON_CONSTANTS_FILE="client-python/aiqa/constants.py"
+if [ -f "$PYTHON_CONSTANTS_FILE" ]; then
+    echo "Updating $PYTHON_CONSTANTS_FILE VERSION"
+    # Use sed to update VERSION line, preserving the rest of the file
+    sed -i "s/^VERSION = \".*\"/VERSION = \"$VERSION\"/" "$PYTHON_CONSTANTS_FILE"
+    echo "Updated VERSION to $VERSION in $PYTHON_CONSTANTS_FILE"
 else
-    echo "Warning: $PYTHON_INIT_FILE not found, skipping __version__ update"
+    echo "Warning: $PYTHON_CONSTANTS_FILE not found, skipping VERSION update"
 fi
 # Update Python pyproject.toml
 PYTHON_PYPROJECT_FILE="client-python/pyproject.toml"

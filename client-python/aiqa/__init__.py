@@ -36,8 +36,7 @@ from .tracing import (
 )
 from .client import get_aiqa_client
 from .experiment_runner import ExperimentRunner
-
-__version__ = "0.3.7"
+from .constants import VERSION
 
 __all__ = [
     "WithTracing",
@@ -55,6 +54,6 @@ __all__ = [
     "set_conversation_id",
     "set_component_tag",
     "get_span",
-    "__version__",
+    "VERSION",
 ]
 

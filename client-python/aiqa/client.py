@@ -7,9 +7,6 @@ from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-if TYPE_CHECKING:
-    from .aiqa_exporter import AIQASpanExporter
-
 logger = logging.getLogger("AIQA")
 
 # Compatibility import for TraceIdRatioBased sampler
@@ -46,7 +43,7 @@ class AIQAClient:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._provider: Optional[TracerProvider] = None
-            cls._instance._exporter: Optional[AIQASpanExporter] = None
+            cls._instance._exporter = None # reduce circular import issues by not importing for typecheck here
             cls._instance._enabled: bool = True
             cls._instance._initialized: bool = False
         return cls._instance
@@ -62,12 +59,12 @@ class AIQAClient:
         self._provider = value
     
     @property
-    def exporter(self) -> Optional[AIQASpanExporter]:
+    def exporter(self) -> Optional[Any]:
         """Get the span exporter."""
         return self._exporter
     
     @exporter.setter
-    def exporter(self, value: Optional[AIQASpanExporter]) -> None:
+    def exporter(self, value: Optional[Any]) -> None:
         """Set the span exporter."""
         self._exporter = value
     
@@ -252,10 +249,10 @@ def get_aiqa_tracer() -> trace.Tracer:
     """
     try:
         # Import here to avoid circular import
-        from . import __version__
+        from . import VERSION
         # Compatibility: version parameter may not be supported in older OpenTelemetry versions
         # Try with version parameter (newer OpenTelemetry versions)
-        return trace.get_tracer(AIQA_TRACER_NAME, version=__version__)
+        return trace.get_tracer(AIQA_TRACER_NAME, version=VERSION)
     except Exception as e:
         # Log issue but still return a tracer
         logger.info(f"Issue getting AIQA tracer with version: {e}, using fallback")

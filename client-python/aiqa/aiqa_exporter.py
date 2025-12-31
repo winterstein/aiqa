@@ -14,8 +14,7 @@ from typing import List, Dict, Any, Optional
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
-from .constants import AIQA_TRACER_NAME
-from . import __version__
+from .constants import AIQA_TRACER_NAME, VERSION
 
 logger = logging.getLogger("AIQA")
 
@@ -216,7 +215,7 @@ class AIQASpanExporter(SpanExporter):
         """
         return {
             "name": AIQA_TRACER_NAME,
-            "version": __version__,
+            "version": VERSION,
         }
 
     def _time_to_tuple(self, nanoseconds: int) -> tuple:
